@@ -4,6 +4,7 @@
 #include "executable.h"
 #include "basic.h"
 #include "brainfuck.h"
+#include "graphics.h"
 #include "types.h"
 
 // Forward declarations - these are in kernel.c
@@ -157,6 +158,7 @@ static void shell_help(void) {
     terminal_writestring("  dir [dir]       - List directory contents (alias for ls)\n");
     terminal_writestring("  clear           - Clear the screen\n");
     terminal_writestring("  run <executable> - Run an AFOS executable\n");
+    terminal_writestring("  graphics-test   - Run graphics demo\n");
     terminal_writestring("  help            - Show this help message\n");
     terminal_writestring("\n");
     terminal_writestring("BASIC Programs:\n");
@@ -371,6 +373,46 @@ void shell_process_command(const char* input) {
         }
         // Execute the binary (run command only accepts paths, not system path names)
         exec_load_and_run(args[1], arg_count - 1, &args[1]);
+        return;
+    }
+    
+    match = 1;
+    cmd = "graphics-test";
+    j = 0;
+    while (cmd[j] != '\0' && args[0][j] != '\0') {
+        if (cmd[j] != args[0][j]) {
+            match = 0;
+            break;
+        }
+        j++;
+    }
+    if (match && cmd[j] == '\0' && args[0][j] == '\0') {
+        // Run graphics test (VGA mode 13h: 320x200x8)
+        terminal_writestring("Initializing VGA graphics (mode 13h: 320x200x8)...\n");
+        if (gfx_init(320, 200, 8) == 0) {
+            terminal_writestring("VGA graphics initialized successfully!\n");
+            terminal_writestring("Running graphics demo...\n");
+            gfx_demo();
+            terminal_writestring("Graphics demo complete!\n");
+            terminal_writestring("Press any key to return to text mode...\n");
+            // Wait for keypress
+            extern int keyboard_getchar(void);
+            extern void keyboard_handler(void);
+            int c = -1;
+            while (c == -1) {
+                keyboard_handler();
+                keyboard_handler();
+                c = keyboard_getchar();
+                if (c == -1) {
+                    for (volatile int i = 0; i < 10000; i++);
+                }
+            }
+            terminal_writestring("Shutting down graphics...\n");
+            gfx_shutdown();
+            terminal_writestring("Returned to text mode.\n");
+        } else {
+            terminal_writestring_color("Error: Failed to initialize graphics\n", COLOR_RED);
+        }
         return;
     }
     

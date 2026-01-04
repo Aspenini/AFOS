@@ -5,6 +5,7 @@
 #include "keyboard.h"
 #include "filesystem.h"
 #include "shell.h"
+#include "graphics.h"
 
 // Simple VGA text mode functions
 #define VGA_WIDTH  80
@@ -135,7 +136,7 @@ void terminal_writestring_color(const char* data, uint8_t color) {
 #define COLOR_CYAN    0x0B  // Light cyan on black
 
 // Kernel main function
-void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info __attribute__((unused))) {
+void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     // Initialize terminal
     terminal_initialize();
     

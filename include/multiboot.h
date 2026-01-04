@@ -1,7 +1,7 @@
 #ifndef MULTIBOOT_H
 #define MULTIBOOT_H
 
-#include <stdint.h>
+#include "types.h"
 
 /* Multiboot header magic number */
 #define MULTIBOOT_HEADER_MAGIC      0x1BADB002
@@ -11,6 +11,36 @@
 #define MULTIBOOT_PAGE_ALIGN  0x00000001
 #define MULTIBOOT_MEMORY_INFO 0x00000002
 #define MULTIBOOT_VIDEO_MODE  0x00000004
+
+/* Multiboot tag types */
+#define MULTIBOOT_TAG_TYPE_END               0
+#define MULTIBOOT_TAG_TYPE_CMDLINE           1
+#define MULTIBOOT_TAG_TYPE_BOOT_LOADER_NAME  2
+#define MULTIBOOT_TAG_TYPE_MODULE            3
+#define MULTIBOOT_TAG_TYPE_BASIC_MEMINFO     4
+#define MULTIBOOT_TAG_TYPE_BOOTDEV           5
+#define MULTIBOOT_TAG_TYPE_MMAP              6
+#define MULTIBOOT_TAG_TYPE_VBE               7
+#define MULTIBOOT_TAG_TYPE_FRAMEBUFFER       8
+
+/* Multiboot tag structure */
+struct multiboot_tag {
+    uint32_t type;
+    uint32_t size;
+} __attribute__((packed));
+
+/* Multiboot framebuffer tag */
+struct multiboot_tag_framebuffer {
+    struct multiboot_tag common;
+    uint64_t framebuffer_addr;
+    uint32_t framebuffer_pitch;
+    uint32_t framebuffer_width;
+    uint32_t framebuffer_height;
+    uint8_t framebuffer_bpp;
+    uint8_t framebuffer_type;
+    uint8_t reserved;
+    uint8_t color_info[5];
+} __attribute__((packed));
 
 /* Multiboot information structure */
 struct multiboot_info {

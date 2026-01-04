@@ -3,7 +3,7 @@
 
 #include "types.h"
 
-#define MALLOC_POOL_SIZE (256 * 1024)  // 256KB for dynamic allocation
+#define MALLOC_POOL_SIZE (2 * 1024 * 1024)  // 2MB for dynamic allocation (supports graphics framebuffer)
 static uint8_t malloc_pool[MALLOC_POOL_SIZE];
 static uint32_t malloc_used = 0;
 

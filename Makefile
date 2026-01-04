@@ -37,7 +37,7 @@ BOOT_SRC = $(BOOT_DIR)/boot.asm $(BOOT_DIR)/entry.asm $(BOOT_DIR)/isr.asm $(BOOT
 KERNEL_SRC = $(KERNEL_DIR)/kernel.c $(KERNEL_DIR)/idt.c $(KERNEL_DIR)/isr.c $(KERNEL_DIR)/gdt.c \
              $(KERNEL_DIR)/keyboard.c $(KERNEL_DIR)/filesystem.c $(KERNEL_DIR)/shell.c \
              $(KERNEL_DIR)/executable.c $(KERNEL_DIR)/sysfs_data.c $(KERNEL_DIR)/basic.c \
-             $(KERNEL_DIR)/brainfuck.c $(KERNEL_DIR)/malloc.c
+             $(KERNEL_DIR)/brainfuck.c $(KERNEL_DIR)/graphics.c $(KERNEL_DIR)/vesa.c $(KERNEL_DIR)/malloc.c
 
 # Object files
 BOOT_OBJ = $(BOOT_SRC:.asm=.o)
