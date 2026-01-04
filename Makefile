@@ -37,7 +37,8 @@ BOOT_SRC = $(BOOT_DIR)/boot.asm $(BOOT_DIR)/entry.asm $(BOOT_DIR)/isr.asm $(BOOT
 KERNEL_SRC = $(KERNEL_DIR)/kernel.c $(KERNEL_DIR)/idt.c $(KERNEL_DIR)/isr.c $(KERNEL_DIR)/gdt.c \
              $(KERNEL_DIR)/keyboard.c $(KERNEL_DIR)/filesystem.c $(KERNEL_DIR)/shell.c \
              $(KERNEL_DIR)/executable.c $(KERNEL_DIR)/sysfs_data.c $(KERNEL_DIR)/basic.c \
-             $(KERNEL_DIR)/brainfuck.c $(KERNEL_DIR)/graphics.c $(KERNEL_DIR)/vesa.c $(KERNEL_DIR)/malloc.c
+             $(KERNEL_DIR)/brainfuck.c $(KERNEL_DIR)/graphics.c $(KERNEL_DIR)/vesa.c $(KERNEL_DIR)/malloc.c \
+             $(KERNEL_DIR)/ata.c $(KERNEL_DIR)/blockdev.c $(KERNEL_DIR)/fat32.c
 
 # Object files
 BOOT_OBJ = $(BOOT_SRC:.asm=.o)
@@ -47,8 +48,10 @@ OBJ = $(BOOT_OBJ) $(KERNEL_OBJ)
 # Output
 KERNEL = afos.bin
 ISO = afos.iso
+DISK_IMAGE = afos_disk.img
+DISK_SIZE = 100  # MB
 
-.PHONY: all clean run iso
+.PHONY: all clean run iso disk clean-disk
 
 all: sysfs_data $(KERNEL)
 
@@ -68,6 +71,28 @@ $(KERNEL): $(OBJ)
 # Compile kernel C files
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Create FAT32 disk image (only if it doesn't exist)
+disk: $(DISK_IMAGE)
+
+$(DISK_IMAGE):
+	@if [ ! -f $(DISK_IMAGE) ]; then \
+		echo "Creating $(DISK_SIZE) MB FAT32 disk image..."; \
+		if command -v dd >/dev/null 2>&1 && command -v mkfs.vfat >/dev/null 2>&1; then \
+			dd if=/dev/zero of=$(DISK_IMAGE) bs=1M count=$(DISK_SIZE) 2>/dev/null || \
+			dd if=/dev/zero of=$(DISK_IMAGE) bs=1024 count=$$((1024 * $(DISK_SIZE))) 2>/dev/null; \
+			mkfs.vfat -F 32 $(DISK_IMAGE) >/dev/null 2>&1; \
+			echo "Disk image created: $(DISK_IMAGE)"; \
+		else \
+			echo "Warning: dd or mkfs.vfat not found. Skipping disk creation."; \
+			echo "Install dosfstools to create disk image:"; \
+			echo "  sudo apt install dosfstools  # Ubuntu/Debian/WSL"; \
+			echo "  brew install dosfstools      # macOS"; \
+			touch $(DISK_IMAGE); \
+		fi \
+	else \
+		echo "Disk image already exists: $(DISK_IMAGE)"; \
+	fi
 
 # Create ISO for testing
 iso: $(KERNEL)
@@ -114,13 +139,16 @@ run: $(KERNEL)
 	qemu-system-i386 -kernel $(KERNEL)
 
 # Run ISO with QEMU
-run-iso: iso
-	@echo "Booting ISO in QEMU..."
+run-iso: iso $(DISK_IMAGE)
+	@echo "Booting ISO in QEMU with disk attached..."
 	@echo "Note: If boot fails, try: qemu-system-i386 -cdrom $(ISO) -boot d -m 128"
-	qemu-system-i386 -cdrom $(ISO) -boot d -m 128
+	qemu-system-i386 -cdrom $(ISO) -drive format=raw,file=$(DISK_IMAGE),if=ide,index=0 -boot d -m 128
 
 # Clean build artifacts
-clean:
+clean-disk:
+	rm -f $(DISK_IMAGE)
+
+clean: clean-disk
 	rm -f $(OBJ) $(KERNEL) $(ISO)
 	rm -f $(KERNEL_DIR)/sysfs_data.c
 	rm -rf iso

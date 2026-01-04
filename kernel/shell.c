@@ -15,6 +15,7 @@ void terminal_clear(void);
 
 // Color constants (VGA colors)
 #define COLOR_RED     0x0C  // Light red on black
+#define COLOR_GREEN   0x0A  // Light green on black
 #define COLOR_YELLOW  0x0E  // Yellow on black
 #define COLOR_DEFAULT 0x0F  // White on black
 
@@ -159,6 +160,8 @@ static void shell_help(void) {
     terminal_writestring("  clear           - Clear the screen\n");
     terminal_writestring("  run <executable> - Run an AFOS executable\n");
     terminal_writestring("  graphics-test   - Run graphics demo\n");
+    terminal_writestring("  save            - Save files to disk (FAT32)\n");
+    terminal_writestring("  create <file>   - Create a new empty file\n");
     terminal_writestring("  help            - Show this help message\n");
     terminal_writestring("\n");
     terminal_writestring("BASIC Programs:\n");
@@ -409,6 +412,68 @@ void shell_process_command(const char* input) {
             terminal_writestring("Returned to text mode.\n");
         } else {
             terminal_writestring_color("Error: Failed to initialize graphics\n", COLOR_RED);
+        }
+        return;
+    }
+    
+    // Save command
+    match = 1;
+    cmd = "save";
+    j = 0;
+    while (cmd[j] != '\0' && args[0][j] != '\0') {
+        if (cmd[j] != args[0][j]) {
+            match = 0;
+            break;
+        }
+        j++;
+    }
+    if (match && cmd[j] == '\0' && args[0][j] == '\0') {
+        extern int fs_save_to_disk(void);
+        terminal_writestring("Saving files to disk...\n");
+        if (fs_save_to_disk() == 0) {
+            terminal_writestring_color("Files saved successfully!\n", COLOR_GREEN);
+        } else {
+            terminal_writestring_color("Error: Failed to save files to disk\n", COLOR_RED);
+            terminal_writestring_color("Make sure FAT32 filesystem is mounted\n", COLOR_RED);
+        }
+        return;
+    }
+    
+    match = 1;
+    cmd = "create";
+    j = 0;
+    while (cmd[j] != '\0' && args[0][j] != '\0') {
+        if (cmd[j] != args[0][j]) {
+            match = 0;
+            break;
+        }
+        j++;
+    }
+    if (match && cmd[j] == '\0' && args[0][j] == '\0') {
+        if (arg_count < 2) {
+            terminal_writestring_color("Usage: create <filename>\n", COLOR_YELLOW);
+            terminal_writestring_color("Example: create chicken.txt\n", COLOR_YELLOW);
+        } else {
+            // Create file in current directory
+            if (fs_current_dir == NULL) {
+                terminal_writestring_color("Error: No current directory\n", COLOR_RED);
+            } else {
+                // Check if file already exists
+                if (fs_find_child(fs_current_dir, args[1]) != NULL) {
+                    terminal_writestring_color("Error: File already exists: ", COLOR_RED);
+                    terminal_writestring_color(args[1], COLOR_RED);
+                    terminal_writestring_color("\n", COLOR_RED);
+                } else {
+                    // Create empty file (NULL data, size 0)
+                    if (fs_create_file(fs_current_dir, args[1], NULL, 0) == 0) {
+                        terminal_writestring_color("File created: ", COLOR_GREEN);
+                        terminal_writestring(args[1]);
+                        terminal_writestring_color("\n", COLOR_GREEN);
+                    } else {
+                        terminal_writestring_color("Error: Failed to create file\n", COLOR_RED);
+                    }
+                }
+            }
         }
         return;
     }

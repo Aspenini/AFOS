@@ -168,6 +168,16 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     terminal_writestring("Initializing keyboard...\n");
     keyboard_init();
     
+    // Initialize block device system (for disk support)
+    terminal_writestring("Initializing block devices...\n");
+    extern int blockdev_init(void);
+    blockdev_init();  // Initialize ATA/disk support
+    
+    // Initialize FAT32 filesystem
+    terminal_writestring("Initializing FAT32 filesystem...\n");
+    extern int fat32_init(void);
+    fat32_init();  // Try to mount FAT32 filesystem
+    
     // Initialize filesystem
     terminal_writestring("Initializing filesystem...\n");
     fs_init();
@@ -175,6 +185,11 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     // Load files from sys/ directory (generated at build time)
     terminal_writestring("Loading system files...\n");
     sysfs_initialize();
+    
+    // Load files from disk into in-memory filesystem
+    terminal_writestring("Loading files from disk...\n");
+    extern int fs_load_from_disk(void);
+    fs_load_from_disk();
     
     // Enable interrupts
     terminal_writestring("Enabling interrupts...\n");

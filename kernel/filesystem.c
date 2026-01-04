@@ -1,5 +1,6 @@
 #include "filesystem.h"
 #include "types.h"
+#include "fat32.h"
 
 fs_node_t* fs_root = NULL;
 fs_node_t* fs_current_dir = NULL;
@@ -292,14 +293,21 @@ int fs_create_file(fs_node_t* parent, const char* name, const uint8_t* data, uin
         return -1;
     }
     
-    // Allocate and copy data
-    file->data = &file_data_pool[file_data_used];
-    file->data_size = size;
-    file_data_used += size;
-    
-    // Copy data
-    for (uint32_t i = 0; i < size; i++) {
-        file->data[i] = data[i];
+    // Handle data allocation
+    if (size == 0 || data == NULL) {
+        // Empty file - no data allocation needed
+        file->data = NULL;
+        file->data_size = 0;
+    } else {
+        // Allocate and copy data
+        file->data = &file_data_pool[file_data_used];
+        file->data_size = size;
+        file_data_used += size;
+        
+        // Copy data
+        for (uint32_t i = 0; i < size; i++) {
+            file->data[i] = data[i];
+        }
     }
     
     return 0;
@@ -325,5 +333,251 @@ uint32_t fs_get_file_size(fs_node_t* file) {
         return 0;
     }
     return file->data_size;
+}
+
+// Write to file (extends or overwrites file data)
+int fs_write_file(fs_node_t* file, const uint8_t* data, uint32_t size) {
+    if (file == NULL || file->type != FS_FILE || data == NULL) {
+        return -1;
+    }
+    
+    // Check if we have enough space
+    uint32_t new_size = file->data_size + size;
+    if (file_data_used - file->data_size + new_size > FILE_DATA_POOL_SIZE) {
+        return -1;  // Not enough space
+    }
+    
+    // If file already has data, we need to reallocate
+    // For simplicity, we'll extend the file
+    if (file->data == NULL) {
+        // Allocate new space
+        file->data = &file_data_pool[file_data_used];
+        file->data_size = size;
+        file_data_used += size;
+        
+        // Copy data
+        for (uint32_t i = 0; i < size; i++) {
+            file->data[i] = data[i];
+        }
+    } else {
+        // Extend file (simple append)
+        uint32_t old_size = file->data_size;
+        
+        // Move data if needed (simplified - in real OS would use better allocation)
+        // For now, just append if there's space
+        if (file_data_used + size <= FILE_DATA_POOL_SIZE) {
+            // Append to end
+            uint8_t* new_data = &file_data_pool[file_data_used];
+            for (uint32_t i = 0; i < old_size; i++) {
+                new_data[i] = file->data[i];
+            }
+            for (uint32_t i = 0; i < size; i++) {
+                new_data[old_size + i] = data[i];
+            }
+            file->data = new_data;
+            file->data_size = old_size + size;
+            file_data_used += size;
+        } else {
+            return -1;  // Not enough space
+        }
+    }
+    
+    return size;
+}
+
+// Save filesystem to disk (saves in-memory files to FAT32)
+int fs_save_to_disk(void) {
+    extern fat32_fs_t* fat32_get_fs(void);
+    extern int fat32_write_file(fat32_fs_t* fs, uint32_t dir_cluster, const char* filename, const uint8_t* data, uint32_t size);
+    
+    fat32_fs_t* fs = fat32_get_fs();
+    
+    if (fs == NULL || !fs->mounted) {
+        return -1;
+    }
+    
+    // Save files from /home directory to FAT32 root
+    fs_node_t* home = fs_find_child(fs_root, "home");
+    if (home == NULL) {
+        return 0;  // No home directory
+    }
+    
+    // Iterate through files in /home and save them to disk
+    for (uint32_t i = 0; i < home->child_count; i++) {
+        fs_node_t* file = home->children[i];
+        if (file != NULL && file->type == FS_FILE) {
+            // Write file to FAT32 (even if empty - data can be NULL, size can be 0)
+            uint8_t* data = (file->data != NULL) ? file->data : (uint8_t*)"";
+            uint32_t size = file->data_size;
+            
+            // Debug: print what we're saving
+            extern void terminal_writestring(const char*);
+            extern void terminal_writestring_color(const char*, uint8_t);
+            terminal_writestring("Saving file: ");
+            terminal_writestring(file->name);
+            terminal_writestring(" (size: ");
+            // Simple number to string conversion for size
+            char size_str[16];
+            uint32_t temp = size;
+            int pos = 0;
+            if (temp == 0) {
+                size_str[pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (temp > 0) {
+                    rev[rev_pos++] = '0' + (temp % 10);
+                    temp /= 10;
+                }
+                for (int j = rev_pos - 1; j >= 0; j--) {
+                    size_str[pos++] = rev[j];
+                }
+            }
+            size_str[pos] = '\0';
+            terminal_writestring(size_str);
+            terminal_writestring(")\n");
+            
+            if (fat32_write_file(fs, fs->root_dir_cluster, file->name, data, size) < 0) {
+                // Error writing file, but continue with others
+                terminal_writestring_color("Error: Failed to write file to disk\n", 0x0C); // Red
+            } else {
+                terminal_writestring_color("Successfully saved to disk\n", 0x0A); // Green
+            }
+        }
+    }
+    
+    return 0;
+}
+
+// Load filesystem from disk (loads files from FAT32 into memory)
+int fs_load_from_disk(void) {
+    extern fat32_fs_t* fat32_get_fs(void);
+    
+    fat32_fs_t* fs = fat32_get_fs();
+    
+    if (fs == NULL || !fs->mounted) {
+        return -1;  // No FAT32 filesystem mounted
+    }
+    
+    // Read root directory
+    fat32_dir_entry_t entries[64];
+    int count = fat32_read_dir(fs, fs->root_dir_cluster, entries, 64);
+    
+    if (count < 0) {
+        return -1;
+    }
+    
+    // Load files from root directory into in-memory filesystem
+    extern void terminal_writestring(const char*);
+    extern void terminal_writestring_color(const char*, uint8_t);
+    terminal_writestring("Loading files from disk...\n");
+    terminal_writestring("Found ");
+    // Simple number to string
+    char count_str[16];
+    int temp = count;
+    int pos = 0;
+    if (temp == 0) {
+        count_str[pos++] = '0';
+    } else {
+        char rev[16];
+        int rev_pos = 0;
+        while (temp > 0) {
+            rev[rev_pos++] = '0' + (temp % 10);
+            temp /= 10;
+        }
+        for (int j = rev_pos - 1; j >= 0; j--) {
+            count_str[pos++] = rev[j];
+        }
+    }
+    count_str[pos] = '\0';
+    terminal_writestring(count_str);
+    terminal_writestring(" directory entries\n");
+    
+    for (int i = 0; i < count; i++) {
+        // Skip directories and special entries
+        if (entries[i].attributes & 0x10) {  // Directory
+            continue;
+        }
+        if (entries[i].name[0] == 0x00 || entries[i].name[0] == 0xE5) {
+            continue;  // Free or deleted
+        }
+        
+        // Convert 8.3 name to regular filename
+        char filename[64];
+        int j = 0;
+        for (int k = 0; k < 8 && entries[i].name[k] != ' '; k++) {
+            filename[j++] = entries[i].name[k];
+        }
+        if (entries[i].name[8] != ' ') {
+            filename[j++] = '.';
+            for (int k = 8; k < 11 && entries[i].name[k] != ' '; k++) {
+                filename[j++] = entries[i].name[k];
+            }
+        }
+        filename[j] = '\0';
+        
+        terminal_writestring("Loading file: ");
+        terminal_writestring(filename);
+        terminal_writestring(" (size: ");
+        // Convert file_size to string
+        char size_str[16];
+        uint32_t file_size = entries[i].file_size;
+        temp = file_size;
+        pos = 0;
+        if (temp == 0) {
+            size_str[pos++] = '0';
+        } else {
+            char rev[16];
+            int rev_pos = 0;
+            while (temp > 0) {
+                rev[rev_pos++] = '0' + (temp % 10);
+                temp /= 10;
+            }
+            for (int j = rev_pos - 1; j >= 0; j--) {
+                size_str[pos++] = rev[j];
+            }
+        }
+        size_str[pos] = '\0';
+        terminal_writestring(size_str);
+        terminal_writestring(")\n");
+        
+        // Read file data (including empty files)
+        if (entries[i].file_size < FILE_DATA_POOL_SIZE) {
+            uint8_t* file_data = NULL;
+            
+            if (file_size > 0) {
+                // Allocate from file data pool
+                if (file_data_used + file_size <= FILE_DATA_POOL_SIZE) {
+                    file_data = &file_data_pool[file_data_used];
+                    if (fat32_read_file(fs, &entries[i], file_data, file_size) > 0) {
+                        file_data_used += file_size;
+                    } else {
+                        file_data = NULL;  // Read failed
+                        terminal_writestring_color("Error: Failed to read file data\n", 0x0C);
+                    }
+                }
+            } else {
+                // Empty file - just create it with NULL data
+                file_data = NULL;
+            }
+            
+            // Create file in in-memory filesystem (even if empty)
+            fs_node_t* home = fs_find_child(fs_root, "home");
+            if (home != NULL) {
+                // Check if file already exists (skip if it does)
+                if (fs_find_child(home, filename) == NULL) {
+                    if (fs_create_file(home, filename, file_data, file_size) == 0) {
+                        terminal_writestring_color("Successfully loaded\n", 0x0A);
+                    } else {
+                        terminal_writestring_color("Error: Failed to create file in memory\n", 0x0C);
+                    }
+                } else {
+                    terminal_writestring("File already exists in memory, skipping\n");
+                }
+            }
+        }
+    }
+    
+    return 0;
 }
 
