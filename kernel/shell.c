@@ -3,6 +3,7 @@
 #include "keyboard.h"
 #include "executable.h"
 #include "basic.h"
+#include "brainfuck.h"
 #include "types.h"
 
 // Forward declarations - these are in kernel.c
@@ -13,6 +14,7 @@ void terminal_clear(void);
 
 // Color constants (VGA colors)
 #define COLOR_RED     0x0C  // Light red on black
+#define COLOR_YELLOW  0x0E  // Yellow on black
 #define COLOR_DEFAULT 0x0F  // White on black
 
 static char shell_buffer[SHELL_BUFFER_SIZE];
@@ -339,7 +341,7 @@ void shell_process_command(const char* input) {
     if (match && cmd[j] == '\0' && args[0][j] == '\0') {
         if (arg_count < 2) {
             terminal_writestring_color("run: missing argument\n", COLOR_RED);
-            terminal_writestring("Usage: run <path/to/file> (must specify full or relative path)\n");
+            terminal_writestring_color("Usage: run <path/to/file> (must specify full or relative path)\n", COLOR_YELLOW);
             return;
         }
         // Check if it's a .bas file
@@ -354,6 +356,17 @@ void shell_process_command(const char* input) {
                 basic_load_and_run(args[1]);
                 basic_cleanup();
                 return;
+            }
+            // Check if it's a .bf file
+            if (run_arg_len >= 3) {
+                if (args[1][run_arg_len-3] == '.' &&
+                    args[1][run_arg_len-2] == 'b' &&
+                    args[1][run_arg_len-1] == 'f') {
+                    // Run with Brainfuck interpreter
+                    brainfuck_load_and_run(args[1]);
+                    brainfuck_cleanup();
+                    return;
+                }
             }
         }
         // Execute the binary (run command only accepts paths, not system path names)
@@ -394,15 +407,30 @@ void shell_process_command(const char* input) {
             }
         }
     }
+    // Check if it's a .bf file - run with Brainfuck interpreter
+    if (arg_len >= 3) {
+        if (args[0][arg_len-3] == '.' &&
+            args[0][arg_len-2] == 'b' &&
+            args[0][arg_len-1] == 'f') {
+            // Resolve path and run with Brainfuck interpreter
+            fs_node_t* file = fs_resolve_path(args[0]);
+            if (file != NULL && file->type == FS_FILE) {
+                brainfuck_load_and_run(args[0]);
+                brainfuck_cleanup();
+                return;
+            }
+        }
+    }
     
     // Check if it's a program in /sys/components
     fs_node_t* program = fs_find_program(args[0]);
     if (program != NULL) {
-        // Found program in system path - check if it's a .bas file
+        // Found program in system path - check if it's a .bas or .bf file
         uint32_t name_len = 0;
         while (program->name[name_len] != '\0') name_len++;
         
         int is_bas = 0;
+        int is_bf = 0;
         if (name_len >= 4) {
             // Check if ends with .bas
             if (program->name[name_len-4] == '.' &&
@@ -410,6 +438,14 @@ void shell_process_command(const char* input) {
                 program->name[name_len-2] == 'a' &&
                 program->name[name_len-1] == 's') {
                 is_bas = 1;
+            }
+        }
+        if (name_len >= 3) {
+            // Check if ends with .bf
+            if (program->name[name_len-3] == '.' &&
+                program->name[name_len-2] == 'b' &&
+                program->name[name_len-1] == 'f') {
+                is_bf = 1;
             }
         }
         
@@ -442,6 +478,10 @@ void shell_process_command(const char* input) {
             // Run with BASIC interpreter
             basic_load_and_run(program_path);
             basic_cleanup();
+        } else if (is_bf) {
+            // Run with Brainfuck interpreter
+            brainfuck_load_and_run(program_path);
+            brainfuck_cleanup();
         } else {
             // Run as AFOS binary
             exec_load_and_run(program_path, arg_count, args);

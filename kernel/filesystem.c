@@ -212,7 +212,7 @@ fs_node_t* fs_find_program(const char* name) {
         first_match = found;
     }
     
-    // Try with common extensions (including .bas for BASIC programs)
+    // Try with common extensions (including .bas for BASIC programs and .bf for Brainfuck)
     const char* extensions[] = {".afos", ".bas", ".bf", ".exe", ".bin", ".app", NULL};
     for (int i = 0; extensions[i] != NULL; i++) {
         char fullname[MAX_FILENAME_LENGTH];
