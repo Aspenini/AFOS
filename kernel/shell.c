@@ -390,25 +390,22 @@ void shell_process_command(const char* input) {
         // Run graphics test (VGA mode 13h: 320x200x8)
         terminal_writestring("Initializing VGA graphics (mode 13h: 320x200x8)...\n");
         if (gfx_init(320, 200, 8) == 0) {
-            terminal_writestring("VGA graphics initialized successfully!\n");
-            terminal_writestring("Running graphics demo...\n");
+            // Graphics mode is now active - screen may be blank/black
+            // Run demo immediately (no terminal output visible in graphics mode)
             gfx_demo();
-            terminal_writestring("Graphics demo complete!\n");
-            terminal_writestring("Press any key to return to text mode...\n");
-            // Wait for keypress
-            extern int keyboard_getchar(void);
-            extern void keyboard_handler(void);
-            int c = -1;
-            while (c == -1) {
-                keyboard_handler();
-                keyboard_handler();
-                c = keyboard_getchar();
-                if (c == -1) {
-                    for (volatile int i = 0; i < 10000; i++);
+            
+            // Wait 5 seconds before closing graphics
+            // Use a busy-wait loop (approximate timing, depends on CPU speed)
+            for (volatile uint32_t outer = 0; outer < 5000; outer++) {
+                for (volatile uint32_t inner = 0; inner < 10000; inner++) {
+                    // Busy wait
                 }
             }
-            terminal_writestring("Shutting down graphics...\n");
+            
+            // Switch back to text mode before printing
             gfx_shutdown();
+            
+            // Now we can print to terminal
             terminal_writestring("Returned to text mode.\n");
         } else {
             terminal_writestring_color("Error: Failed to initialize graphics\n", COLOR_RED);

@@ -81,8 +81,21 @@ int gfx_init(uint32_t width, uint32_t height, uint32_t bpp) {
     // Set mode
     gfx_ctx.mode = (gfx_ctx.bpp == 8) ? GFX_MODE_320x200x8 : GFX_MODE_640x480x32;
     
-    // Clear framebuffer
-    gfx_clear(0);
+    // Verify dimensions are correct (should be 320x200 for mode 13h)
+    // Force correct dimensions if they don't match
+    if (gfx_ctx.width != 320 || gfx_ctx.height != 200) {
+        gfx_ctx.width = 320;
+        gfx_ctx.height = 200;
+        gfx_ctx.pitch = 320;
+    }
+    
+    // Clear framebuffer with black
+    // For VGA mode 13h, we need to clear the entire framebuffer
+    uint32_t fb_size = gfx_ctx.width * gfx_ctx.height;
+    uint8_t* fb = gfx_ctx.framebuffer;
+    for (uint32_t i = 0; i < fb_size; i++) {
+        fb[i] = 0;  // Black (palette index 0)
+    }
     
     return 0;
 }
@@ -154,7 +167,13 @@ uint32_t gfx_get_pixel(uint32_t x, uint32_t y) {
     if (gfx_ctx.framebuffer == NULL) return 0;
     if (x >= gfx_ctx.width || y >= gfx_ctx.height) return 0;
     
-    uint32_t offset = y * gfx_ctx.pitch + x * (gfx_ctx.bpp / 8);
+    // Calculate offset - for 8-bit mode, pitch equals width (linear framebuffer)
+    uint32_t offset;
+    if (gfx_ctx.bpp == 8) {
+        offset = y * gfx_ctx.width + x;  // Linear: y * width + x
+    } else {
+        offset = y * gfx_ctx.pitch + x * (gfx_ctx.bpp / 8);
+    }
     
     if (gfx_ctx.bpp == 32) {
         uint32_t* pixel = (uint32_t*)(gfx_ctx.framebuffer + offset);
@@ -217,13 +236,32 @@ void gfx_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t colo
     gfx_draw_line(x + w - 1, y, x + w - 1, y + h - 1, color);
 }
 
-// Fill rectangle
+// Fill rectangle (optimized - writes directly to framebuffer)
 void gfx_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
     if (gfx_ctx.framebuffer == NULL) return;
     
-    for (uint32_t py = y; py < y + h && py < gfx_ctx.height; py++) {
-        for (uint32_t px = x; px < x + w && px < gfx_ctx.width; px++) {
-            gfx_set_pixel(px, py, color);
+    // Clamp to screen bounds
+    if (x >= gfx_ctx.width || y >= gfx_ctx.height) return;
+    if (x + w > gfx_ctx.width) w = gfx_ctx.width - x;
+    if (y + h > gfx_ctx.height) h = gfx_ctx.height - y;
+    
+    uint8_t* target = gfx_ctx.framebuffer;
+    uint8_t c = (uint8_t)(color & 0xFF);
+    
+    // For 8-bit mode, use direct memory writes (much faster)
+    if (gfx_ctx.bpp == 8) {
+        for (uint32_t py = 0; py < h; py++) {
+            uint32_t offset = (y + py) * gfx_ctx.width + x;
+            for (uint32_t px = 0; px < w; px++) {
+                target[offset + px] = c;
+            }
+        }
+    } else {
+        // 32-bit mode
+        for (uint32_t py = y; py < y + h; py++) {
+            for (uint32_t px = x; px < x + w; px++) {
+                gfx_set_pixel(px, py, color);
+            }
         }
     }
 }
@@ -277,29 +315,52 @@ static uint32_t isqrt(uint32_t n) {
     return x;
 }
 
-// Fill circle
+// Fill circle (optimized - writes directly to framebuffer)
 void gfx_fill_circle(uint32_t x, uint32_t y, uint32_t radius, uint32_t color) {
     if (gfx_ctx.framebuffer == NULL) return;
     
     int32_t r = (int32_t)radius;
     int32_t cx = (int32_t)x;
     int32_t cy = (int32_t)y;
+    uint8_t* target = gfx_ctx.framebuffer;
+    uint8_t c = (uint8_t)(color & 0xFF);
     
-    // Draw filled circle by drawing horizontal lines
-    for (int32_t py = -r; py <= r; py++) {
-        int32_t py_sq = py * py;
-        int32_t r_sq = r * r;
-        if (py_sq > r_sq) continue;
-        
-        int32_t px = (int32_t)isqrt((uint32_t)(r_sq - py_sq));
-        
-        // Draw horizontal line
-        for (int32_t px2 = -px; px2 <= px; px2++) {
-            int32_t fx = cx + px2;
+    // Draw filled circle by drawing horizontal lines (optimized for 8-bit)
+    if (gfx_ctx.bpp == 8) {
+        for (int32_t py = -r; py <= r; py++) {
+            int32_t py_sq = py * py;
+            int32_t r_sq = r * r;
+            if (py_sq > r_sq) continue;
+            
+            int32_t px = (int32_t)isqrt((uint32_t)(r_sq - py_sq));
             int32_t fy = cy + py;
-            if (fx >= 0 && fx < (int32_t)gfx_ctx.width && 
-                fy >= 0 && fy < (int32_t)gfx_ctx.height) {
-                gfx_set_pixel((uint32_t)fx, (uint32_t)fy, color);
+            
+            if (fy >= 0 && fy < (int32_t)gfx_ctx.height) {
+                // Draw horizontal line directly
+                for (int32_t px2 = -px; px2 <= px; px2++) {
+                    int32_t fx = cx + px2;
+                    if (fx >= 0 && fx < (int32_t)gfx_ctx.width) {
+                        uint32_t offset = (uint32_t)fy * gfx_ctx.width + (uint32_t)fx;
+                        target[offset] = c;
+                    }
+                }
+            }
+        }
+    } else {
+        // 32-bit mode - use gfx_set_pixel
+        for (int32_t py = -r; py <= r; py++) {
+            int32_t py_sq = py * py;
+            int32_t r_sq = r * r;
+            if (py_sq > r_sq) continue;
+            
+            int32_t px = (int32_t)isqrt((uint32_t)(r_sq - py_sq));
+            for (int32_t px2 = -px; px2 <= px; px2++) {
+                int32_t fx = cx + px2;
+                int32_t fy = cy + py;
+                if (fx >= 0 && fx < (int32_t)gfx_ctx.width && 
+                    fy >= 0 && fy < (int32_t)gfx_ctx.height) {
+                    gfx_set_pixel((uint32_t)fx, (uint32_t)fy, color);
+                }
             }
         }
     }
@@ -330,43 +391,95 @@ void gfx_fill_triangle(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint3
     if (y1 > y3) { tx = x1; ty = y1; x1 = x3; y1 = y3; x3 = tx; y3 = ty; }
     if (y2 > y3) { tx = x2; ty = y2; x2 = x3; y2 = y3; x3 = tx; y3 = ty; }
     
-    if (y2 == y3) {
-        // Flat bottom triangle
-        int32_t xl = (int32_t)x1, xr = (int32_t)x1;
-        int32_t dx1 = (y1 != y2) ? ((int32_t)x2 - (int32_t)x1) / ((int32_t)y2 - (int32_t)y1) : 0;
-        int32_t dx2 = (y1 != y3) ? ((int32_t)x3 - (int32_t)x1) / ((int32_t)y3 - (int32_t)y1) : 0;
-        
-        for (int32_t y = (int32_t)y1; y <= (int32_t)y2; y++) {
-            if (xl > xr) { int32_t t = xl; xl = xr; xr = t; }
-            for (int32_t x = xl; x <= xr; x++) {
-                if (x >= 0 && x < (int32_t)gfx_ctx.width && y >= 0 && y < (int32_t)gfx_ctx.height) {
-                    gfx_set_pixel((uint32_t)x, (uint32_t)y, color);
+    uint8_t* target = gfx_ctx.framebuffer;
+    uint8_t c = (uint8_t)(color & 0xFF);
+    
+    if (gfx_ctx.bpp == 8) {
+        // Optimized 8-bit mode
+        if (y2 == y3) {
+            // Flat bottom triangle
+            int32_t xl = (int32_t)x1, xr = (int32_t)x1;
+            int32_t dx1 = (y1 != y2) ? ((int32_t)x2 - (int32_t)x1) / ((int32_t)y2 - (int32_t)y1) : 0;
+            int32_t dx2 = (y1 != y3) ? ((int32_t)x3 - (int32_t)x1) / ((int32_t)y3 - (int32_t)y1) : 0;
+            
+            for (int32_t y = (int32_t)y1; y <= (int32_t)y2; y++) {
+                if (xl > xr) { int32_t t = xl; xl = xr; xr = t; }
+                if (y >= 0 && y < (int32_t)gfx_ctx.height) {
+                    uint32_t base_offset = (uint32_t)y * gfx_ctx.width;
+                    for (int32_t x = xl; x <= xr; x++) {
+                        if (x >= 0 && x < (int32_t)gfx_ctx.width) {
+                            target[base_offset + (uint32_t)x] = c;
+                        }
+                    }
                 }
+                xl += dx1;
+                xr += dx2;
             }
-            xl += dx1;
-            xr += dx2;
-        }
-    } else if (y1 == y2) {
-        // Flat top triangle
-        int32_t xl = (int32_t)x1, xr = (int32_t)x2;
-        int32_t dx1 = ((int32_t)x3 - (int32_t)x1) / ((int32_t)y3 - (int32_t)y1);
-        int32_t dx2 = ((int32_t)x3 - (int32_t)x2) / ((int32_t)y3 - (int32_t)y2);
-        
-        for (int32_t y = (int32_t)y1; y <= (int32_t)y3; y++) {
-            if (xl > xr) { int32_t t = xl; xl = xr; xr = t; }
-            for (int32_t x = xl; x <= xr; x++) {
-                if (x >= 0 && x < (int32_t)gfx_ctx.width && y >= 0 && y < (int32_t)gfx_ctx.height) {
-                    gfx_set_pixel((uint32_t)x, (uint32_t)y, color);
+        } else if (y1 == y2) {
+            // Flat top triangle
+            int32_t xl = (int32_t)x1, xr = (int32_t)x2;
+            int32_t dx1 = ((int32_t)x3 - (int32_t)x1) / ((int32_t)y3 - (int32_t)y1);
+            int32_t dx2 = ((int32_t)x3 - (int32_t)x2) / ((int32_t)y3 - (int32_t)y2);
+            
+            for (int32_t y = (int32_t)y1; y <= (int32_t)y3; y++) {
+                if (xl > xr) { int32_t t = xl; xl = xr; xr = t; }
+                if (y >= 0 && y < (int32_t)gfx_ctx.height) {
+                    uint32_t base_offset = (uint32_t)y * gfx_ctx.width;
+                    for (int32_t x = xl; x <= xr; x++) {
+                        if (x >= 0 && x < (int32_t)gfx_ctx.width) {
+                            target[base_offset + (uint32_t)x] = c;
+                        }
+                    }
                 }
+                xl += dx1;
+                xr += dx2;
             }
-            xl += dx1;
-            xr += dx2;
+        } else {
+            // General case: split into two triangles
+            uint32_t x4 = x1 + ((int32_t)(x3 - x1) * (int32_t)(y2 - y1)) / ((int32_t)(y3 - y1));
+            gfx_fill_triangle(x1, y1, x2, y2, x4, y2, color);
+            gfx_fill_triangle(x2, y2, x3, y3, x4, y2, color);
         }
     } else {
-        // General case: split into two triangles
-        uint32_t x4 = x1 + ((int32_t)(x3 - x1) * (int32_t)(y2 - y1)) / ((int32_t)(y3 - y1));
-        gfx_fill_triangle(x1, y1, x2, y2, x4, y2, color);
-        gfx_fill_triangle(x2, y2, x3, y3, x4, y2, color);
+        // 32-bit mode - use gfx_set_pixel
+        if (y2 == y3) {
+            // Flat bottom triangle
+            int32_t xl = (int32_t)x1, xr = (int32_t)x1;
+            int32_t dx1 = (y1 != y2) ? ((int32_t)x2 - (int32_t)x1) / ((int32_t)y2 - (int32_t)y1) : 0;
+            int32_t dx2 = (y1 != y3) ? ((int32_t)x3 - (int32_t)x1) / ((int32_t)y3 - (int32_t)y1) : 0;
+            
+            for (int32_t y = (int32_t)y1; y <= (int32_t)y2; y++) {
+                if (xl > xr) { int32_t t = xl; xl = xr; xr = t; }
+                for (int32_t x = xl; x <= xr; x++) {
+                    if (x >= 0 && x < (int32_t)gfx_ctx.width && y >= 0 && y < (int32_t)gfx_ctx.height) {
+                        gfx_set_pixel((uint32_t)x, (uint32_t)y, color);
+                    }
+                }
+                xl += dx1;
+                xr += dx2;
+            }
+        } else if (y1 == y2) {
+            // Flat top triangle
+            int32_t xl = (int32_t)x1, xr = (int32_t)x2;
+            int32_t dx1 = ((int32_t)x3 - (int32_t)x1) / ((int32_t)y3 - (int32_t)y1);
+            int32_t dx2 = ((int32_t)x3 - (int32_t)x2) / ((int32_t)y3 - (int32_t)y2);
+            
+            for (int32_t y = (int32_t)y1; y <= (int32_t)y3; y++) {
+                if (xl > xr) { int32_t t = xl; xl = xr; xr = t; }
+                for (int32_t x = xl; x <= xr; x++) {
+                    if (x >= 0 && x < (int32_t)gfx_ctx.width && y >= 0 && y < (int32_t)gfx_ctx.height) {
+                        gfx_set_pixel((uint32_t)x, (uint32_t)y, color);
+                    }
+                }
+                xl += dx1;
+                xr += dx2;
+            }
+        } else {
+            // General case: split into two triangles
+            uint32_t x4 = x1 + ((int32_t)(x3 - x1) * (int32_t)(y2 - y1)) / ((int32_t)(y3 - y1));
+            gfx_fill_triangle(x1, y1, x2, y2, x4, y2, color);
+            gfx_fill_triangle(x2, y2, x3, y3, x4, y2, color);
+        }
     }
 }
 
@@ -588,7 +701,7 @@ void gfx_demo(void) {
     // Define colors (for 8-bit mode, use palette indices)
     // VGA mode 13h has a standard 256-color palette
     // We'll use simple color indices for the demo
-    uint32_t dark_blue = 1;  // Dark blue (palette index)
+    uint32_t dark_blue = 0;  // Black (palette index 0 - most reliable)
     uint32_t white = 15;     // White in VGA palette
     uint32_t red = 4;        // Red in VGA palette
     uint32_t green = 2;      // Green in VGA palette
@@ -597,7 +710,7 @@ void gfx_demo(void) {
     uint32_t cyan = 11;      // Cyan in VGA palette
     uint32_t magenta = 13;   // Magenta in VGA palette
     
-    // Clear screen with dark blue
+    // Clear screen with dark blue background
     gfx_clear(dark_blue);
     
     // Draw some filled rectangles (scaled for 320x200)
@@ -649,7 +762,6 @@ void gfx_demo(void) {
     gfx_draw_text(10, 5, "AFOS Graphics", white);
     gfx_draw_text(10, 190, "Triangles & Text!", yellow);
     
-    // Swap buffers to display everything
-    gfx_swap_buffers();
+    // No need to swap buffers - we're writing directly to framebuffer
 }
 
