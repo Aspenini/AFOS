@@ -21,6 +21,12 @@ void irq_handler(uint32_t irq_num) {
             keyboard_handler();
         }
         
+        // Handle network card (IRQ11 - typical for RTL8139)
+        if (irq == 11) {
+            extern void rtl8139_irq_handler(void);
+            rtl8139_irq_handler();
+        }
+        
         // Send EOI to PIC (must be done before handling to allow nested interrupts)
         if (irq >= 8) {
             // Send to slave PIC
@@ -84,6 +90,16 @@ void pic_init(void) {
         "inb $0x21, %%al\n\t"
         "and $0xFD, %%al\n\t"  // Clear bit 1 (keyboard)
         "out %%al, $0x21\n\t"
+        :
+        :
+        : "al"
+    );
+    
+    // Enable IRQ11 (network card) - clear bit 3 in slave PIC
+    __asm__ volatile(
+        "inb $0xA1, %%al\n\t"
+        "and $0xF7, %%al\n\t"  // Clear bit 3 (IRQ11)
+        "out %%al, $0xA1\n\t"
         :
         :
         : "al"

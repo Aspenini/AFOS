@@ -191,6 +191,27 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     extern int fs_load_from_disk(void);
     fs_load_from_disk();
     
+    // Initialize network driver
+    terminal_writestring("Initializing network...\n");
+    extern int rtl8139_init(void);
+    rtl8139_init();
+    
+    // Initialize Ethernet layer
+    extern void ethernet_init(void);
+    ethernet_init();
+    
+    // Initialize ARP layer
+    extern void arp_init(void);
+    arp_init();
+    
+    // Initialize IP layer
+    extern void ip_init(void);
+    ip_init();
+    
+    // Initialize ICMP layer
+    extern void icmp_init(void);
+    icmp_init();
+    
     // Enable interrupts
     terminal_writestring("Enabling interrupts...\n");
     __asm__ volatile("sti");

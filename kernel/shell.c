@@ -5,6 +5,9 @@
 #include "basic.h"
 #include "brainfuck.h"
 #include "graphics.h"
+#include "icmp.h"
+#include "ip.h"
+#include "ethernet.h"
 #include "types.h"
 
 // Forward declarations - these are in kernel.c
@@ -490,6 +493,120 @@ void shell_process_command(const char* input) {
     }
     if (match && cmd[j] == '\0' && args[0][j] == '\0') {
         shell_help();
+        return;
+    }
+    
+    // Ping command
+    match = 1;
+    cmd = "ping";
+    j = 0;
+    while (cmd[j] != '\0' && args[0][j] != '\0') {
+        if (cmd[j] != args[0][j]) {
+            match = 0;
+            break;
+        }
+        j++;
+    }
+    if (match && cmd[j] == '\0' && args[0][j] == '\0') {
+        if (arg_count < 2) {
+            terminal_writestring_color("Usage: ping <ip_address>\n", COLOR_YELLOW);
+            terminal_writestring_color("Example: ping 10.0.2.2\n", COLOR_YELLOW);
+        } else {
+            // Parse IP address (simple format: a.b.c.d)
+            uint32_t ip = 0;
+            const char* ip_str = args[1];
+            int octet = 0;
+            int value = 0;
+            int valid = 1;
+            
+            for (int i = 0; ip_str[i] != '\0' && valid; i++) {
+                if (ip_str[i] >= '0' && ip_str[i] <= '9') {
+                    value = value * 10 + (ip_str[i] - '0');
+                    if (value > 255) {
+                        valid = 0;
+                    }
+                } else if (ip_str[i] == '.') {
+                    if (octet >= 4 || value > 255) {
+                        valid = 0;
+                        break;
+                    }
+                    ip |= (value & 0xFF) << (octet * 8);
+                    octet++;
+                    value = 0;
+                } else {
+                    valid = 0;
+                }
+            }
+            
+            if (valid && octet == 3) {
+                ip |= (value & 0xFF) << (octet * 8);
+                
+                // Convert to network byte order (IP addresses are stored in network byte order)
+                // Our parsing gives us host byte order, but IP layer expects network byte order
+                // Actually, IP addresses in the IP header are in network byte order,
+                // but we're storing them as uint32_t in host byte order for simplicity.
+                // The IP layer will handle the conversion when building the header.
+                
+                terminal_writestring("Pinging ");
+                terminal_writestring(args[1]);
+                terminal_writestring("...\n");
+                
+                // Poll for network packets before sending (to process any pending packets)
+                extern void arp_poll(void);
+                arp_poll();
+                
+                // Send ping (4 packets)
+                for (int seq = 0; seq < 4; seq++) {
+                    // Poll for packets before each ping
+                    ethernet_poll_for_packets();
+                    
+                    // Send echo request
+                    if (icmp_send_echo_request(ip, 1, seq, NULL, 0) == 0) {
+                        terminal_writestring("Ping sent (seq ");
+                        // Print sequence number
+                        char seq_str[4];
+                        int seq_pos = 0;
+                        int temp = seq;
+                        if (temp == 0) {
+                            seq_str[seq_pos++] = '0';
+                        } else {
+                            char rev[4];
+                            int rev_pos = 0;
+                            while (temp > 0) {
+                                rev[rev_pos++] = '0' + (temp % 10);
+                                temp /= 10;
+                            }
+                            for (int k = rev_pos - 1; k >= 0; k--) {
+                                seq_str[seq_pos++] = rev[k];
+                            }
+                        }
+                        seq_str[seq_pos] = '\0';
+                        terminal_writestring(seq_str);
+                        terminal_writestring(")\n");
+                    } else {
+                        terminal_writestring_color("Failed to send ping\n", COLOR_RED);
+                    }
+                    
+                    // Wait and poll for replies
+                    for (int wait = 0; wait < 50; wait++) {
+                        ethernet_poll_for_packets();
+                        // Small delay
+                        for (volatile int delay = 0; delay < 20000; delay++);
+                    }
+                }
+                
+                // Final poll for any remaining replies
+                for (int i = 0; i < 10; i++) {
+                    ethernet_poll_for_packets();
+                    for (volatile int delay = 0; delay < 20000; delay++);
+                }
+                
+                terminal_writestring("Ping complete.\n");
+            } else {
+                terminal_writestring_color("Invalid IP address format\n", COLOR_RED);
+                terminal_writestring_color("Expected format: a.b.c.d (e.g., 10.0.2.2)\n", COLOR_YELLOW);
+            }
+        }
         return;
     }
     

@@ -38,7 +38,8 @@ KERNEL_SRC = $(KERNEL_DIR)/kernel.c $(KERNEL_DIR)/idt.c $(KERNEL_DIR)/isr.c $(KE
              $(KERNEL_DIR)/keyboard.c $(KERNEL_DIR)/filesystem.c $(KERNEL_DIR)/shell.c \
              $(KERNEL_DIR)/executable.c $(KERNEL_DIR)/sysfs_data.c $(KERNEL_DIR)/basic.c \
              $(KERNEL_DIR)/brainfuck.c $(KERNEL_DIR)/graphics.c $(KERNEL_DIR)/vesa.c $(KERNEL_DIR)/malloc.c \
-             $(KERNEL_DIR)/ata.c $(KERNEL_DIR)/blockdev.c $(KERNEL_DIR)/fat32.c
+             $(KERNEL_DIR)/ata.c $(KERNEL_DIR)/blockdev.c $(KERNEL_DIR)/fat32.c \
+             $(KERNEL_DIR)/rtl8139.c $(KERNEL_DIR)/ethernet.c $(KERNEL_DIR)/arp.c $(KERNEL_DIR)/ip.c $(KERNEL_DIR)/icmp.c
 
 # Object files
 BOOT_OBJ = $(BOOT_SRC:.asm=.o)
@@ -142,7 +143,7 @@ run: $(KERNEL)
 run-iso: iso $(DISK_IMAGE)
 	@echo "Booting ISO in QEMU with disk attached..."
 	@echo "Note: If boot fails, try: qemu-system-i386 -cdrom $(ISO) -boot d -m 128"
-	qemu-system-i386 -cdrom $(ISO) -drive format=raw,file=$(DISK_IMAGE),if=ide,index=0 -boot d -m 128
+	qemu-system-i386 -cdrom $(ISO) -drive format=raw,file=$(DISK_IMAGE),if=ide,index=0 -netdev user,id=net0 -device rtl8139,netdev=net0 -boot d -m 128
 
 # Clean build artifacts
 clean-disk:
