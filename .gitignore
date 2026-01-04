@@ -1,0 +1,48 @@
+# Build artifacts
+*.o
+*.bin
+*.iso
+*.elf
+*.a
+*.so
+
+# Compiled tools (keep source, ignore binaries)
+tools/afos-pack
+
+# Generated files
+kernel/sysfs_data.c
+
+# Build directories
+iso/
+build/
+dist/
+
+# Editor and IDE files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+
+# Backup files
+*.bak
+*.tmp
+*.orig
+
+# Debug files
+*.dSYM/
+*.dwarf
+*.map
+
+# QEMU files
+qemu-*
+
+# Logs
+*.log
+
