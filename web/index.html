@@ -28,24 +28,7 @@
             </div>
         </div>
     </div>
-    <script>
-        // Load v86 library
-        (function() {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/@copy/v86@0.9.2/build/libv86.js';
-            script.onerror = function() {
-                console.log('Primary CDN failed, trying backup...');
-                this.src = 'https://unpkg.com/@copy/v86@0.9.2/build/libv86.js';
-            };
-            script.onload = function() {
-                console.log('v86 library loaded');
-                if (window.V86Starter || window.V86) {
-                    window.V86Starter = window.V86Starter || window.V86;
-                }
-            };
-            document.head.appendChild(script);
-        })();
-    </script>
+    <script src="https://cdn.jsdelivr.net/gh/copy/v86@master/build/libv86.js"></script>
     <script src="main.js"></script>
 </body>
 </html>

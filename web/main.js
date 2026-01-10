@@ -23,29 +23,50 @@ function updateStatus(text, className = '') {
     log(text);
 }
 
-// Wait for v86 to load
-function waitForV86(callback, maxAttempts = 100) {
+// Wait for v86 to load - check multiple possible names
+function waitForV86(callback, maxAttempts = 150) {
     let attempts = 0;
     updateStatus('Loading v86 library...', 'loading');
+    log('Checking for v86 library...');
+    
     const check = setInterval(() => {
         attempts++;
-        const V86 = window.V86Starter || window.V86;
-        if (typeof V86 !== 'undefined') {
+        
+        // Check multiple possible global variable names
+        let V86 = null;
+        if (typeof window.V86Starter !== 'undefined') {
+            V86 = window.V86Starter;
+            log('Found V86Starter');
+        } else if (typeof window.V86 !== 'undefined') {
+            V86 = window.V86;
+            log('Found V86');
+        } else if (typeof window.v86 !== 'undefined') {
+            V86 = window.v86;
+            log('Found v86 (lowercase)');
+        } else if (typeof V86Starter !== 'undefined') {
+            V86 = V86Starter;
+            log('Found V86Starter (no window prefix)');
+        }
+        
+        if (V86 && typeof V86 === 'function') {
             clearInterval(check);
-            window.V86Starter = V86;
+            window.V86Starter = V86; // Normalize to V86Starter
             updateStatus('v86 library loaded', 'running');
-            log('v86 library loaded successfully');
+            log('v86 library loaded successfully - ready to use');
             callback();
         } else if (attempts >= maxAttempts) {
             clearInterval(check);
             updateStatus('Error: v86 library failed to load', 'error');
             log('ERROR: v86 library failed to load after ' + maxAttempts + ' attempts');
+            log('Available globals: ' + Object.keys(window).filter(k => k.toLowerCase().includes('v86')).join(', ') || 'none');
             if (startBtn) {
                 startBtn.disabled = false;
                 startBtn.textContent = 'ERROR: REFRESH PAGE';
                 startBtn.style.background = '#ff0000';
                 startBtn.style.color = '#fff';
             }
+        } else if (attempts % 10 === 0) {
+            log('Still waiting for v86 library... (attempt ' + attempts + '/' + maxAttempts + ')');
         }
     }, 100);
 }
@@ -80,10 +101,10 @@ function startEmulator() {
             },
             autostart: true,
             bios: {
-                url: "https://cdn.jsdelivr.net/npm/@copy/v86@0.9.2/bios/seabios.bin"
+                url: "https://cdn.jsdelivr.net/gh/copy/v86@master/bios/seabios.bin"
             },
             vga_bios: {
-                url: "https://cdn.jsdelivr.net/npm/@copy/v86@0.9.2/bios/vgabios.bin"
+                url: "https://cdn.jsdelivr.net/gh/copy/v86@master/bios/vgabios.bin"
             },
             boot_order: 0x3,
             keyboard: {
@@ -159,32 +180,43 @@ function startEmulator() {
     }
 }
 
-// Initialize when v86 is loaded
-waitForV86(() => {
-    if (startBtn) {
-        startBtn.textContent = 'START';
-        startBtn.disabled = false;
-    }
-    updateStatus('Ready to start', 'running');
-});
-
-if (startBtn) {
-    startBtn.addEventListener('click', startEmulator);
-}
-
-// Focus screen container for keyboard input
-if (screenContainer) {
-    screenContainer.addEventListener('click', function() {
-        const canvas = screenContainer.querySelector('canvas');
-        if (canvas) {
-            canvas.focus();
-            log('Canvas focused - keyboard input ready');
-        }
-    });
-}
-
-// Initial log after DOM is ready
-setTimeout(() => {
+// Initialize when DOM and scripts are ready
+function init() {
     log('AFOS Web Emulator initialized');
     updateStatus('Initializing...', 'loading');
-}, 100);
+    
+    // Wait for v86 library to load
+    waitForV86(() => {
+        if (startBtn) {
+            startBtn.textContent = 'START';
+            startBtn.disabled = false;
+        }
+        updateStatus('Ready to start', 'running');
+    });
+    
+    if (startBtn) {
+        startBtn.addEventListener('click', startEmulator);
+    }
+    
+    // Focus screen container for keyboard input
+    if (screenContainer) {
+        screenContainer.addEventListener('click', function() {
+            const canvas = screenContainer.querySelector('canvas');
+            if (canvas) {
+                canvas.focus();
+                log('Canvas focused - keyboard input ready');
+            }
+        });
+    }
+}
+
+// Wait for page to fully load before initializing
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+        // Give v86 script time to load
+        setTimeout(init, 500);
+    });
+} else {
+    // Page already loaded, wait a bit for v86 script
+    setTimeout(init, 500);
+}
