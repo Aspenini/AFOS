@@ -2,10 +2,12 @@
 *.o
 *.bin
 *.iso
-!web/afos.iso
 *.elf
 *.a
 *.so
+
+# Exception: allow web/afos.iso to be committed for web deployment
+!web/afos.iso
 
 # Compiled tools (keep source, ignore binaries)
 tools/afos-pack

@@ -1,13 +1,10 @@
 # Simple workflow for deploying static content to GitHub Pages
-name: Deploy AFOS Website
+name: Deploy Website
 
 on:
   # run manually from the Actions tab
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
 
 permissions:
   contents: read
@@ -22,38 +19,20 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: https://afos.aspenini.com
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup build environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nasm gcc-multilib grub-pc-bin python3 python3-pip
-          # Install mtools for disk image creation
-          sudo apt-get install -y mtools dosfstools
-
-      - name: Build AFOS ISO
-        run: |
-          make sysfs_data
-          make afos.bin
-          make iso
-
-      - name: Prepare web directory
-        run: |
-          mkdir -p web
-          cp afos.iso web/afos.iso
-          # Ensure .nojekyll exists to disable Jekyll processing
-          touch web/.nojekyll
-          # Ensure CNAME exists for custom domain
-          echo "afos.aspenini.com" > web/CNAME
-
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload artifact (web/)
+      # Optional: ensure Jekyll doesn't change static files
+      - name: Add .nojekyll
+        run: touch site/.nojekyll
+
+      - name: Upload artifact (docs/)
         uses: actions/upload-pages-artifact@v3
         with:
           # path relative to the repo root
