@@ -1,46 +1,56 @@
-// AFOS Web Emulator - Using v86
+// AFOS Web Emulator - Minimal
 let emulator = null;
 let isRunning = false;
-
-// Get DOM elements
-const startBtn = document.getElementById('start-btn');
-const stopBtn = document.getElementById('stop-btn');
-const resetBtn = document.getElementById('reset-btn');
-const fullscreenBtn = document.getElementById('fullscreen-btn');
-const screenContainer = document.getElementById('screen-container');
-const statusText = document.querySelector('.status-text');
-const statusIndicator = document.querySelector('.status-indicator');
-const container = document.querySelector('.container');
-
-// Check if ISO file exists
 const ISO_PATH = './afos.iso';
 
-// Initialize emulator
+const startBtn = document.getElementById('start-btn');
+const screenContainer = document.getElementById('screen-container');
+const container = document.querySelector('.container');
+
+// Wait for v86 to load - check both V86Starter and V86
+function waitForV86(callback, maxAttempts = 100) {
+    let attempts = 0;
+    const check = setInterval(() => {
+        attempts++;
+        // Check for V86Starter or V86 (different versions use different names)
+        const V86 = window.V86Starter || window.V86;
+        if (typeof V86 !== 'undefined') {
+            clearInterval(check);
+            window.V86Starter = V86; // Normalize to V86Starter
+            console.log('v86 library loaded successfully');
+            callback();
+        } else if (attempts >= maxAttempts) {
+            clearInterval(check);
+            console.error('v86 library failed to load after', maxAttempts, 'attempts');
+            startBtn.disabled = false;
+            startBtn.textContent = 'ERROR: REFRESH PAGE';
+            startBtn.style.background = '#ff0000';
+            startBtn.style.color = '#fff';
+        }
+    }, 100);
+}
+
 function startEmulator() {
     if (isRunning) {
         return;
     }
     
-    // Check if v86 is loaded
-    if (typeof V86Starter === 'undefined') {
-        updateStatus('Error: v86 library not loaded. Please refresh the page.', 'stopped');
+    if (typeof window.V86Starter === 'undefined') {
+        console.error('V86Starter not available');
+        startBtn.textContent = 'LOADING...';
+        waitForV86(startEmulator);
         return;
     }
     
-    updateStatus('Starting emulator...', 'running');
+    isRunning = true;
     startBtn.disabled = true;
-    
-    // Remove existing canvas if it exists (v86 will create its own)
-    const existingCanvas = screenContainer.querySelector('canvas');
-    if (existingCanvas) {
-        existingCanvas.remove();
-    }
+    startBtn.textContent = 'STARTING...';
+    container.classList.add('running');
     
     try {
-        // Configure v86 emulator
-        emulator = new V86Starter({
+        emulator = new window.V86Starter({
             screen_container: screenContainer,
-            memory_size: 128 * 1024 * 1024, // 128MB
+            memory_size: 128 * 1024 * 1024,
             vga_memory_size: 8 * 1024 * 1024,
             cdrom: {
                 async: true,
@@ -48,147 +58,55 @@ function startEmulator() {
             },
             autostart: true,
             bios: {
-                url: "https://cdn.jsdelivr.net/gh/copy/v86@latest/bios/seabios.bin"
+                url: "https://cdn.jsdelivr.net/npm/@copy/v86@0.9.2/bios/seabios.bin"
             },
             vga_bios: {
-                url: "https://cdn.jsdelivr.net/gh/copy/v86@latest/bios/vgabios.bin"
+                url: "https://cdn.jsdelivr.net/npm/@copy/v86@0.9.2/bios/vgabios.bin"
             },
-            boot_order: 0x3, // Boot from CD-ROM (0x80 = hard disk, 0x1 = floppy, 0x3 = CD-ROM)
-            network_relay_url: "<UNUSED>",
-            // Disable network for now (v86 network requires relay server)
-            // network_relay_url: "wss://relay.widgetry.org/",
+            boot_order: 0x3,
             keyboard: {
-                keyboard_layout: V86Starter.KeyboardLayout.US,
+                keyboard_layout: (window.V86Starter && window.V86Starter.KeyboardLayout) ? window.V86Starter.KeyboardLayout.US : 'us',
             },
-        });
-        
-        // Handle emulator events
-        emulator.add_listener("emulator-ready", function() {
-            updateStatus('Emulator ready, booting OS...', 'running');
-        });
-        
-        emulator.add_listener("screen-put-char", function(ch) {
-            // Character displayed
         });
         
         emulator.add_listener("emulator-started", function() {
-            isRunning = true;
-            updateStatus('OS is running', 'running');
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
-            resetBtn.disabled = false;
-        });
-        
-        // Error handling
-        emulator.add_listener("download-progress", function(loaded, total) {
-            const percent = Math.round((loaded / total) * 100);
-            updateStatus(`Loading BIOS: ${percent}%`, 'running');
+            startBtn.style.display = 'none';
         });
         
         emulator.add_listener("error", function(error) {
             console.error('Emulator error:', error);
-            updateStatus('Error: ' + (error.message || 'Unknown error'), 'stopped');
-            isRunning = false;
             startBtn.disabled = false;
-            stopBtn.disabled = true;
-            resetBtn.disabled = true;
+            startBtn.textContent = 'ERROR: CLICK TO RETRY';
+            startBtn.style.background = '#ff0000';
+            startBtn.style.color = '#fff';
+            isRunning = false;
+            container.classList.remove('running');
         });
         
     } catch (error) {
         console.error('Failed to start emulator:', error);
-        updateStatus('Failed to start: ' + error.message, 'stopped');
         startBtn.disabled = false;
+        startBtn.textContent = 'ERROR: CLICK TO RETRY';
+        startBtn.style.background = '#ff0000';
+        startBtn.style.color = '#fff';
         isRunning = false;
+        container.classList.remove('running');
     }
 }
 
-function stopEmulator() {
-    if (!emulator || !isRunning) {
-        return;
-    }
-    
-    try {
-        emulator.stop();
-        emulator = null;
-        isRunning = false;
-        updateStatus('Emulator stopped', 'stopped');
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-        resetBtn.disabled = true;
-        
-        // Clear screen container
-        screenContainer.innerHTML = '<canvas id="screen"></canvas>';
-    } catch (error) {
-        console.error('Error stopping emulator:', error);
-    }
-}
-
-function resetEmulator() {
-    if (!emulator || !isRunning) {
-        return;
-    }
-    
-    stopEmulator();
-    // Wait a bit before restarting
-    setTimeout(() => {
-        startEmulator();
-    }, 500);
-}
-
-function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-        container.classList.add('fullscreen');
-        container.requestFullscreen().catch(err => {
-            console.error('Error entering fullscreen:', err);
-            container.classList.remove('fullscreen');
-        });
-        fullscreenBtn.textContent = 'Exit Fullscreen';
-    } else {
-        document.exitFullscreen();
-        container.classList.remove('fullscreen');
-        fullscreenBtn.textContent = 'Fullscreen';
-    }
-}
-
-function updateStatus(text, state) {
-    statusText.textContent = text;
-    statusIndicator.className = 'status-indicator ' + (state || 'stopped');
-}
-
-// Event listeners
-startBtn.addEventListener('click', startEmulator);
-stopBtn.addEventListener('click', stopEmulator);
-resetBtn.addEventListener('click', resetEmulator);
-fullscreenBtn.addEventListener('click', toggleFullscreen);
-
-// Handle fullscreen change
-document.addEventListener('fullscreenchange', function() {
-    if (!document.fullscreenElement) {
-        container.classList.remove('fullscreen');
-        fullscreenBtn.textContent = 'Fullscreen';
-    }
+// Initialize when v86 is loaded
+waitForV86(() => {
+    startBtn.textContent = 'START';
+    startBtn.disabled = false;
 });
 
-// Handle keyboard focus for better input - attach to container since canvas is created dynamically
+startBtn.addEventListener('click', startEmulator);
+
+// Focus screen container for keyboard input
 screenContainer.addEventListener('click', function() {
     const canvas = screenContainer.querySelector('canvas');
     if (canvas) {
         canvas.focus();
     }
 });
-
-// Check if ISO file exists
-fetch(ISO_PATH, { method: 'HEAD' })
-    .then(response => {
-        if (response.ok) {
-            updateStatus('Ready to start (ISO found)', 'stopped');
-        } else {
-            updateStatus('Warning: ISO file not found. Run "make web" to build.', 'stopped');
-            startBtn.disabled = true;
-        }
-    })
-    .catch(error => {
-        updateStatus('Warning: Could not check for ISO file. Run "make web" to build.', 'stopped');
-        startBtn.disabled = true;
-    });
 
