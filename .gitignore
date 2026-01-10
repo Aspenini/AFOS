@@ -6,8 +6,10 @@
 *.a
 *.so
 
-# Exception: allow web/afos.iso to be committed for web deployment
+# Exception: allow web/afos.iso and v86 library files to be committed for web deployment
 !web/afos.iso
+!web/libv86.js
+!web/bios/*.bin
 
 # Compiled tools (keep source, ignore binaries)
 tools/afos-pack

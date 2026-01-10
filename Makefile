@@ -176,15 +176,11 @@ web: iso
 	@echo "Copying ISO to web directory..."
 	@cp $(ISO) web/afos.iso || (echo "Error: Failed to copy ISO. Build the ISO first with 'make iso'." && exit 1)
 	@echo ""
-	@echo "Web build complete!"
-	@echo "Files are in the 'web/' directory"
+	@echo "Web build complete! Files are in the 'web/' directory"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  1. Commit web/afos.iso: git add web/afos.iso && git commit -m 'Update web ISO'"
 	@echo "  2. Push to deploy to afos.aspenini.com"
 	@echo ""
-	@echo "To run locally:"
-	@echo "  1. Start a local web server in the web/ directory:"
-	@echo "     python3 -m http.server 8000  (or: python -m http.server 8000)"
-	@echo "  2. Open http://localhost:8000 in your browser"
+	@echo "To run locally: cd web && python3 server.py (or: python server.py)"
 
