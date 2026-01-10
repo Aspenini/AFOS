@@ -28,9 +28,9 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      # Optional: ensure Jekyll doesn't change static files
+      # Ensure Jekyll doesn't change static files
       - name: Add .nojekyll
-        run: touch site/.nojekyll
+        run: touch web/.nojekyll
 
       - name: Upload artifact (docs/)
         uses: actions/upload-pages-artifact@v3
