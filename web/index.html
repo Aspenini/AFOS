@@ -8,9 +8,24 @@
 </head>
 <body>
     <div class="container">
-        <div id="screen-container"></div>
-        <div class="controls">
-            <button id="start-btn" class="btn-start">START</button>
+        <div class="header">
+            <h1>AFOS</h1>
+        </div>
+        <div class="content">
+            <div id="screen-container"></div>
+            <div class="sidebar">
+                <div class="status-panel">
+                    <h3>Status</h3>
+                    <div id="status" class="status-text">Ready</div>
+                </div>
+                <div class="log-panel">
+                    <h3>Logs</h3>
+                    <div id="logs" class="log-text"></div>
+                </div>
+                <div class="controls">
+                    <button id="start-btn" class="btn-start">START</button>
+                </div>
+            </div>
         </div>
     </div>
     <script>

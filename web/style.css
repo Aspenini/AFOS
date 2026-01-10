@@ -8,8 +8,8 @@ body {
     font-family: 'Courier New', 'Consolas', monospace;
     background: #0a0a0a;
     color: #00ff00;
-    overflow: hidden;
     height: 100vh;
+    overflow: hidden;
 }
 
 .container {
@@ -20,38 +20,117 @@ body {
     background: #000;
 }
 
+.header {
+    padding: 15px 20px;
+    background: #0a0a0a;
+    border-bottom: 1px solid #1a1a1a;
+}
+
+.header h1 {
+    color: #00ff00;
+    font-size: 18px;
+    letter-spacing: 2px;
+}
+
+.content {
+    flex: 1;
+    display: flex;
+    gap: 20px;
+    padding: 20px;
+    overflow: hidden;
+}
+
 #screen-container {
     flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
     background: #000;
-    overflow: hidden;
+    border: 1px solid #1a1a1a;
+    min-width: 0;
+    max-width: 80vw;
 }
 
 #screen-container canvas {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
     display: block;
-    border: 1px solid #1a1a1a;
     max-width: 100%;
     max-height: 100%;
 }
 
+.sidebar {
+    width: 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    background: #0a0a0a;
+    border: 1px solid #1a1a1a;
+    padding: 15px;
+}
+
+.status-panel, .log-panel {
+    flex: 1;
+    min-height: 0;
+}
+
+.status-panel h3, .log-panel h3 {
+    color: #00ff00;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #1a1a1a;
+    padding-bottom: 5px;
+}
+
+.status-text {
+    color: #00ff00;
+    font-size: 11px;
+    line-height: 1.6;
+    word-wrap: break-word;
+}
+
+.log-text {
+    color: #00aa00;
+    font-size: 10px;
+    line-height: 1.5;
+    word-wrap: break-word;
+    overflow-y: auto;
+    max-height: 200px;
+    font-family: 'Courier New', monospace;
+}
+
+.log-text::-webkit-scrollbar {
+    width: 6px;
+}
+
+.log-text::-webkit-scrollbar-track {
+    background: #0a0a0a;
+}
+
+.log-text::-webkit-scrollbar-thumb {
+    background: #1a1a1a;
+}
+
+.log-text::-webkit-scrollbar-thumb:hover {
+    background: #2a2a2a;
+}
+
 .controls {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    z-index: 1000;
+    margin-top: auto;
+    padding-top: 15px;
+    border-top: 1px solid #1a1a1a;
 }
 
 .btn-start {
+    width: 100%;
     background: #00ff00;
     color: #000;
     border: none;
     padding: 12px 24px;
     font-family: 'Courier New', monospace;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: bold;
     cursor: pointer;
     text-transform: uppercase;
@@ -77,14 +156,14 @@ body {
     box-shadow: none;
 }
 
-/* Hide controls when running */
-.running .controls {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.5s;
+.status-text.running {
+    color: #00ff00;
 }
 
-.running .controls:hover {
-    opacity: 1;
-    pointer-events: all;
+.status-text.error {
+    color: #ff0000;
+}
+
+.status-text.loading {
+    color: #ffff00;
 }
