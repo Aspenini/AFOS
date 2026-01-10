@@ -99,6 +99,8 @@ int fat32_find_file(fat32_fs_t* fs, uint32_t dir_cluster, const char* filename, 
 
 // Read file data
 int fat32_read_file(fat32_fs_t* fs, fat32_dir_entry_t* entry, uint8_t* buffer, uint32_t size);
+// Read file data with offset
+int fat32_read_file_at(fat32_fs_t* fs, fat32_dir_entry_t* entry, uint32_t offset, uint8_t* buffer, uint32_t size);
 
 // Write file data (create or update)
 int fat32_write_file(fat32_fs_t* fs, uint32_t dir_cluster, const char* filename, const uint8_t* data, uint32_t size);

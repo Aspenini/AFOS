@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AFOS - Running in Browser</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AFOS - Aspen Feltner Operating System</h1>
+            <p class="subtitle">32-bit Ring 0 OS running in WASM QEMU (v86 emulator)</p>
+        </header>
+        
+        <div class="controls">
+            <button id="start-btn" class="btn btn-primary">Start OS</button>
+            <button id="stop-btn" class="btn btn-danger" disabled>Stop</button>
+            <button id="reset-btn" class="btn btn-secondary" disabled>Reset</button>
+            <button id="fullscreen-btn" class="btn btn-secondary">Fullscreen</button>
+        </div>
+        
+        <div class="status" id="status">
+            <span class="status-indicator"></span>
+            <span class="status-text">Ready to start</span>
+        </div>
+        
+        <div id="screen-container">
+            <!-- Canvas will be created by v86 automatically -->
+        </div>
+        
+        <div class="info">
+            <h3>Instructions</h3>
+            <ul>
+                <li>Click <strong>Start OS</strong> to boot AFOS</li>
+                <li>Use your keyboard to interact with the OS shell</li>
+                <li>Type <code>ls</code> or <code>dir</code> to list files</li>
+                <li>Type <code>cd &lt;dir&gt;</code> to change directories</li>
+                <li>Press <strong>Fullscreen</strong> for a better experience</li>
+                <li>Known commands: <code>ls</code>, <code>dir</code>, <code>cd</code>, <code>cat</code>, <code>run</code>, <code>bas</code>, <code>bf</code></li>
+            </ul>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/gh/copy/v86@latest/build/libv86.js"></script>
+    <script>
+        // Wait for v86 to load before initializing
+        window.addEventListener('load', function() {
+            if (typeof V86Starter === 'undefined') {
+                console.error('v86 library failed to load');
+                document.querySelector('.status-text').textContent = 'Error: v86 library failed to load. Check your internet connection.';
+            }
+        });
+    </script>
+    <script src="main.js"></script>
+</body>
+</html>
+

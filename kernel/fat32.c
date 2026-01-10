@@ -358,31 +358,62 @@ int fat32_find_file(fat32_fs_t* fs, uint32_t dir_cluster, const char* filename, 
 
 // Read file data
 int fat32_read_file(fat32_fs_t* fs, fat32_dir_entry_t* entry, uint8_t* buffer, uint32_t size) {
+    return fat32_read_file_at(fs, entry, 0, buffer, size);
+}
+
+// Read file data with offset
+int fat32_read_file_at(fat32_fs_t* fs, fat32_dir_entry_t* entry, uint32_t offset, uint8_t* buffer, uint32_t size) {
     if (!fs->mounted || entry == NULL || buffer == NULL) {
         return -1;
     }
     
+    // Check if offset is beyond file size
+    if (offset >= entry->file_size) {
+        return 0;  // Nothing to read
+    }
+    
+    // Limit size to remaining file data
+    if (offset + size > entry->file_size) {
+        size = entry->file_size - offset;
+    }
+    
     // Get first cluster
     uint32_t cluster = entry->cluster_low | (entry->cluster_high << 16);
-    uint32_t bytes_read = 0;
     uint32_t cluster_size = fs->sectors_per_cluster * fs->bytes_per_sector;
     uint8_t cluster_buffer[512 * 16];  // Max cluster size
+    
+    // Skip clusters until we reach the offset
+    uint32_t bytes_skipped = 0;
+    while (bytes_skipped + cluster_size <= offset && cluster >= 2 && cluster < fs->total_clusters + 2) {
+        bytes_skipped += cluster_size;
+        cluster = fat32_get_next_cluster(fs, cluster);
+        if (cluster >= FAT32_CLUSTER_EOF) {
+            return 0;  // Offset beyond file
+        }
+    }
+    
+    // Calculate offset within current cluster
+    uint32_t cluster_offset = offset - bytes_skipped;
+    uint32_t bytes_read = 0;
     
     while (cluster >= 2 && cluster < fs->total_clusters + 2 && bytes_read < size) {
         if (read_cluster(fs, cluster, cluster_buffer) != 0) {
             return -1;
         }
         
+        // Calculate how much to copy from this cluster
         uint32_t to_copy = size - bytes_read;
-        if (to_copy > cluster_size) {
-            to_copy = cluster_size;
+        uint32_t available_in_cluster = cluster_size - cluster_offset;
+        if (to_copy > available_in_cluster) {
+            to_copy = available_in_cluster;
         }
         
-        memcpy(buffer + bytes_read, cluster_buffer, to_copy);
+        memcpy(buffer + bytes_read, cluster_buffer + cluster_offset, to_copy);
         bytes_read += to_copy;
         
-        // Get next cluster
+        // Move to next cluster, reset cluster offset
         cluster = fat32_get_next_cluster(fs, cluster);
+        cluster_offset = 0;
         if (cluster >= FAT32_CLUSTER_EOF) {
             break;
         }

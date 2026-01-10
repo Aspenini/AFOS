@@ -40,6 +40,7 @@ fs_node_t* fs_find_program(const char* name); // Find program in /sys/components
 // File operations
 int fs_create_file(fs_node_t* parent, const char* name, const uint8_t* data, uint32_t size);
 int fs_read_file(fs_node_t* file, uint8_t* buffer, uint32_t size);
+int fs_read_file_at(fs_node_t* file, uint32_t offset, uint8_t* buffer, uint32_t size);  // Read with offset
 int fs_write_file(fs_node_t* file, const uint8_t* data, uint32_t size);  // Write to file
 uint32_t fs_get_file_size(fs_node_t* file);
 

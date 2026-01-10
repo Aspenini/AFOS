@@ -282,11 +282,6 @@ int fs_create_file(fs_node_t* parent, const char* name, const uint8_t* data, uin
         return -1;
     }
     
-    // Check if we have enough space
-    if (file_data_used + size > FILE_DATA_POOL_SIZE) {
-        return -1;
-    }
-    
     // Create file node
     fs_node_t* file = fs_create_node(name, FS_FILE, parent);
     if (file == NULL) {
@@ -294,19 +289,30 @@ int fs_create_file(fs_node_t* parent, const char* name, const uint8_t* data, uin
     }
     
     // Handle data allocation
-    if (size == 0 || data == NULL) {
+    if (size == 0) {
         // Empty file - no data allocation needed
         file->data = NULL;
         file->data_size = 0;
+    } else if (data == NULL) {
+        // Disk-only file (data not loaded into memory, but size is known)
+        file->data = NULL;
+        file->data_size = size;  // Store size so we know it exists on disk
     } else {
-        // Allocate and copy data
-        file->data = &file_data_pool[file_data_used];
-        file->data_size = size;
-        file_data_used += size;
-        
-        // Copy data
-        for (uint32_t i = 0; i < size; i++) {
-            file->data[i] = data[i];
+        // Check if we have enough space to load into memory
+        if (file_data_used + size <= FILE_DATA_POOL_SIZE) {
+            // Allocate and copy data
+            file->data = &file_data_pool[file_data_used];
+            file->data_size = size;
+            file_data_used += size;
+            
+            // Copy data
+            for (uint32_t i = 0; i < size; i++) {
+                file->data[i] = data[i];
+            }
+        } else {
+            // File too large - create entry but don't load data (will read from disk)
+            file->data = NULL;
+            file->data_size = size;  // Store size so we know it exists
         }
     }
     
@@ -319,12 +325,102 @@ int fs_read_file(fs_node_t* file, uint8_t* buffer, uint32_t size) {
         return -1;
     }
     
-    uint32_t to_copy = size < file->data_size ? size : file->data_size;
-    for (uint32_t i = 0; i < to_copy; i++) {
-        buffer[i] = file->data[i];
+    // If data is in memory, read from memory
+    if (file->data != NULL) {
+        uint32_t to_copy = size < file->data_size ? size : file->data_size;
+        for (uint32_t i = 0; i < to_copy; i++) {
+            buffer[i] = file->data[i];
+        }
+        return to_copy;
     }
     
-    return to_copy;
+    // Data is NULL but file_size > 0 means it's on disk - read from disk
+    if (file->data_size > 0) {
+        extern fat32_fs_t* fat32_get_fs(void);
+        extern int fat32_find_file(fat32_fs_t* fs, uint32_t dir_cluster, const char* filename, fat32_dir_entry_t* entry);
+        extern int fat32_read_file(fat32_fs_t* fs, fat32_dir_entry_t* entry, uint8_t* buffer, uint32_t size);
+        
+        fat32_fs_t* fs = fat32_get_fs();
+        if (fs != NULL && fs->mounted) {
+            // Find the file on disk
+            // We need to find which directory this file is in
+            // For now, try home directory
+            fat32_dir_entry_t entry;
+            if (fat32_find_file(fs, fs->root_dir_cluster, "HOME", &entry) == 0 && (entry.attributes & 0x10)) {
+                uint32_t home_cluster = entry.cluster_low | (entry.cluster_high << 16);
+                if (fat32_find_file(fs, home_cluster, file->name, &entry) == 0) {
+                    uint32_t to_read = size < file->data_size ? size : file->data_size;
+                    return fat32_read_file(fs, &entry, buffer, to_read);
+                }
+            } else if (fat32_find_file(fs, fs->root_dir_cluster, "home", &entry) == 0 && (entry.attributes & 0x10)) {
+                uint32_t home_cluster = entry.cluster_low | (entry.cluster_high << 16);
+                if (fat32_find_file(fs, home_cluster, file->name, &entry) == 0) {
+                    uint32_t to_read = size < file->data_size ? size : file->data_size;
+                    return fat32_read_file(fs, &entry, buffer, to_read);
+                }
+            }
+        }
+    }
+    
+    return 0;  // No data available
+}
+
+// Read file data with offset
+int fs_read_file_at(fs_node_t* file, uint32_t offset, uint8_t* buffer, uint32_t size) {
+    if (file == NULL || file->type != FS_FILE || buffer == NULL) {
+        return -1;
+    }
+    
+    // If data is in memory, read from memory
+    if (file->data != NULL) {
+        if (offset >= file->data_size) {
+            return 0;  // Offset beyond file
+        }
+        uint32_t to_copy = size;
+        if (offset + to_copy > file->data_size) {
+            to_copy = file->data_size - offset;
+        }
+        for (uint32_t i = 0; i < to_copy; i++) {
+            buffer[i] = file->data[offset + i];
+        }
+        return to_copy;
+    }
+    
+    // Data is NULL but file_size > 0 means it's on disk - read from disk
+    if (file->data_size > 0) {
+        extern fat32_fs_t* fat32_get_fs(void);
+        extern int fat32_find_file(fat32_fs_t* fs, uint32_t dir_cluster, const char* filename, fat32_dir_entry_t* entry);
+        extern int fat32_read_file_at(fat32_fs_t* fs, fat32_dir_entry_t* entry, uint32_t offset, uint8_t* buffer, uint32_t size);
+        
+        fat32_fs_t* fs = fat32_get_fs();
+        if (fs != NULL && fs->mounted) {
+            // Find the file on disk
+            // We need to find which directory this file is in
+            // For now, try home directory
+            fat32_dir_entry_t entry;
+            if (fat32_find_file(fs, fs->root_dir_cluster, "HOME", &entry) == 0 && (entry.attributes & 0x10)) {
+                uint32_t home_cluster = entry.cluster_low | (entry.cluster_high << 16);
+                if (fat32_find_file(fs, home_cluster, file->name, &entry) == 0) {
+                    uint32_t to_read = size;
+                    if (offset + to_read > file->data_size) {
+                        to_read = file->data_size - offset;
+                    }
+                    return fat32_read_file_at(fs, &entry, offset, buffer, to_read);
+                }
+            } else if (fat32_find_file(fs, fs->root_dir_cluster, "home", &entry) == 0 && (entry.attributes & 0x10)) {
+                uint32_t home_cluster = entry.cluster_low | (entry.cluster_high << 16);
+                if (fat32_find_file(fs, home_cluster, file->name, &entry) == 0) {
+                    uint32_t to_read = size;
+                    if (offset + to_read > file->data_size) {
+                        to_read = file->data_size - offset;
+                    }
+                    return fat32_read_file_at(fs, &entry, offset, buffer, to_read);
+                }
+            }
+        }
+    }
+    
+    return 0;  // No data available
 }
 
 // Get file size
@@ -449,28 +545,19 @@ int fs_save_to_disk(void) {
     return 0;
 }
 
-// Load filesystem from disk (loads files from FAT32 into memory)
-int fs_load_from_disk(void) {
-    extern fat32_fs_t* fat32_get_fs(void);
-    
-    fat32_fs_t* fs = fat32_get_fs();
-    
-    if (fs == NULL || !fs->mounted) {
-        return -1;  // No FAT32 filesystem mounted
-    }
-    
-    // Read root directory
-    fat32_dir_entry_t entries[64];
-    int count = fat32_read_dir(fs, fs->root_dir_cluster, entries, 64);
-    
-    if (count < 0) {
-        return -1;
-    }
-    
-    // Load files from root directory into in-memory filesystem
+// Helper function to load files from a directory
+static void load_files_from_dir(fat32_fs_t* fs, uint32_t dir_cluster, const char* dir_name) {
     extern void terminal_writestring(const char*);
     extern void terminal_writestring_color(const char*, uint8_t);
-    terminal_writestring("Loading files from disk...\n");
+    extern int fat32_read_dir(fat32_fs_t* fs, uint32_t dir_cluster, fat32_dir_entry_t* entries, uint32_t max_entries);
+    extern int fat32_read_file(fat32_fs_t* fs, fat32_dir_entry_t* entry, uint8_t* buffer, uint32_t size);
+    fat32_dir_entry_t entries[64];
+    int count = fat32_read_dir(fs, dir_cluster, entries, 64);
+    
+    if (count < 0) {
+        return;
+    }
+    
     terminal_writestring("Found ");
     // Simple number to string
     char count_str[16];
@@ -491,7 +578,9 @@ int fs_load_from_disk(void) {
     }
     count_str[pos] = '\0';
     terminal_writestring(count_str);
-    terminal_writestring(" directory entries\n");
+    terminal_writestring(" entries in ");
+    terminal_writestring(dir_name);
+    terminal_writestring("\n");
     
     for (int i = 0; i < count; i++) {
         // Skip directories and special entries
@@ -542,40 +631,89 @@ int fs_load_from_disk(void) {
         terminal_writestring(")\n");
         
         // Read file data (including empty files)
-        if (entries[i].file_size < FILE_DATA_POOL_SIZE) {
-            uint8_t* file_data = NULL;
-            
-            if (file_size > 0) {
+        // For large files, create entry but don't load data (will read from disk when needed)
+        uint8_t* file_data = NULL;
+        
+        if (file_size > 0) {
+            // Only load into memory if it fits in the pool
+            if (file_size < FILE_DATA_POOL_SIZE && file_data_used + file_size <= FILE_DATA_POOL_SIZE) {
                 // Allocate from file data pool
-                if (file_data_used + file_size <= FILE_DATA_POOL_SIZE) {
-                    file_data = &file_data_pool[file_data_used];
-                    if (fat32_read_file(fs, &entries[i], file_data, file_size) > 0) {
-                        file_data_used += file_size;
-                    } else {
-                        file_data = NULL;  // Read failed
-                        terminal_writestring_color("Error: Failed to read file data\n", 0x0C);
-                    }
+                file_data = &file_data_pool[file_data_used];
+                if (fat32_read_file(fs, &entries[i], file_data, file_size) > 0) {
+                    file_data_used += file_size;
+                } else {
+                    file_data = NULL;  // Read failed
+                    terminal_writestring_color("Error: Failed to read file data\n", 0x0C);
                 }
             } else {
-                // Empty file - just create it with NULL data
-                file_data = NULL;
+                // File too large - create entry without data (will read from disk when needed)
+                terminal_writestring(" (too large for memory, will read from disk)\n");
+                file_data = NULL;  // Mark as disk-only file
             }
-            
-            // Create file in in-memory filesystem (even if empty)
-            fs_node_t* home = fs_find_child(fs_root, "home");
-            if (home != NULL) {
-                // Check if file already exists (skip if it does)
-                if (fs_find_child(home, filename) == NULL) {
-                    if (fs_create_file(home, filename, file_data, file_size) == 0) {
+        } else {
+            // Empty file - just create it with NULL data
+            file_data = NULL;
+        }
+        
+        // Create file in in-memory filesystem (even if data not loaded)
+        fs_node_t* home = fs_find_child(fs_root, "home");
+        if (home != NULL) {
+            // Check if file already exists (skip if it does)
+            if (fs_find_child(home, filename) == NULL) {
+                if (fs_create_file(home, filename, file_data, file_size) == 0) {
+                    if (file_data != NULL) {
                         terminal_writestring_color("Successfully loaded\n", 0x0A);
+                    } else if (file_size > 0) {
+                        terminal_writestring_color("File entry created (disk-only)\n", 0x0E);
                     } else {
-                        terminal_writestring_color("Error: Failed to create file in memory\n", 0x0C);
+                        terminal_writestring_color("Successfully loaded\n", 0x0A);
                     }
                 } else {
-                    terminal_writestring("File already exists in memory, skipping\n");
+                    terminal_writestring_color("Error: Failed to create file in memory\n", 0x0C);
                 }
+            } else {
+                terminal_writestring("File already exists in memory, skipping\n");
             }
         }
+    }
+}
+
+int fs_load_from_disk(void) {
+    extern fat32_fs_t* fat32_get_fs(void);
+    
+    fat32_fs_t* fs = fat32_get_fs();
+    
+    if (fs == NULL || !fs->mounted) {
+        return -1;  // No FAT32 filesystem mounted
+    }
+    
+    // Load files from root directory and home subdirectory
+    extern void terminal_writestring(const char*);
+    extern void terminal_writestring_color(const char*, uint8_t);
+    extern int fat32_find_file(fat32_fs_t* fs, uint32_t dir_cluster, const char* filename, fat32_dir_entry_t* entry);
+    
+    terminal_writestring("Loading files from disk...\n");
+    
+    // First, find the home directory (try both "home" and "HOME")
+    fat32_dir_entry_t home_entry;
+    uint32_t home_cluster = 0;
+    if (fat32_find_file(fs, fs->root_dir_cluster, "HOME", &home_entry) == 0) {
+        if (home_entry.attributes & 0x10) {  // Is a directory
+            home_cluster = home_entry.cluster_low | (home_entry.cluster_high << 16);
+            terminal_writestring("Found HOME directory on disk\n");
+        }
+    } else if (fat32_find_file(fs, fs->root_dir_cluster, "home", &home_entry) == 0) {
+        if (home_entry.attributes & 0x10) {  // Is a directory
+            home_cluster = home_entry.cluster_low | (home_entry.cluster_high << 16);
+            terminal_writestring("Found home directory on disk\n");
+        }
+    }
+    
+    // Actually call the function to load files from home directory
+    if (home_cluster != 0 && home_cluster < 0x0FFFFFF8) {
+        load_files_from_dir(fs, home_cluster, "home");
+    } else {
+        terminal_writestring("No home directory found on disk\n");
     }
     
     return 0;

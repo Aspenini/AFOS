@@ -212,6 +212,25 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     extern void icmp_init(void);
     icmp_init();
     
+    // Initialize PIT timer (1000 Hz = 1 tick per millisecond)
+    terminal_writestring("Initializing timer...\n");
+    extern int pit_init(uint32_t frequency_hz);
+    if (pit_init(1000) == 0) {
+        terminal_writestring("Timer initialized (1000 Hz)\n");
+    } else {
+        terminal_writestring_color("Warning: Timer initialization failed\n", COLOR_YELLOW);
+    }
+    
+    // Initialize AC97 audio
+    terminal_writestring("Initializing audio...\n");
+    extern int ac97_init(void);
+    if (ac97_init() == 0) {
+        terminal_writestring("Audio initialized\n");
+    } else {
+        terminal_writestring_color("Warning: Audio initialization failed (AC97 not found)\n", COLOR_YELLOW);
+        terminal_writestring_color("Note: QEMU needs -device ac97 flag for audio support\n", COLOR_YELLOW);
+    }
+    
     // Enable interrupts
     terminal_writestring("Enabling interrupts...\n");
     __asm__ volatile("sti");

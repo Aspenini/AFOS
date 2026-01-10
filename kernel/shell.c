@@ -8,6 +8,9 @@
 #include "icmp.h"
 #include "ip.h"
 #include "ethernet.h"
+#include "audio.h"
+#include "wav.h"
+#include "ac97.h"
 #include "types.h"
 
 // Forward declarations - these are in kernel.c
@@ -163,6 +166,8 @@ static void shell_help(void) {
     terminal_writestring("  clear           - Clear the screen\n");
     terminal_writestring("  run <executable> - Run an AFOS executable\n");
     terminal_writestring("  graphics-test   - Run graphics demo\n");
+    terminal_writestring("  audio-test      - Test audio output (plays a tone)\n");
+    terminal_writestring("  play <file.wav> - Play a WAV audio file\n");
     terminal_writestring("  save            - Save files to disk (FAT32)\n");
     terminal_writestring("  create <file>   - Create a new empty file\n");
     terminal_writestring("  help            - Show this help message\n");
@@ -416,6 +421,500 @@ void shell_process_command(const char* input) {
         } else {
             terminal_writestring_color("Error: Failed to initialize graphics\n", COLOR_RED);
         }
+        return;
+    }
+    
+    match = 1;
+    cmd = "audio-test";
+    j = 0;
+    while (cmd[j] != '\0' && args[0][j] != '\0') {
+        if (cmd[j] != args[0][j]) {
+            match = 0;
+            break;
+        }
+        j++;
+    }
+    if (match && cmd[j] == '\0' && args[0][j] == '\0') {
+        // Test audio output
+        terminal_writestring("Testing audio output...\n");
+        terminal_writestring("Playing 440Hz tone for 2 seconds...\n");
+        
+        extern int audio_generate_tone(uint32_t frequency_hz, uint32_t duration_ms, uint32_t sample_rate);
+        if (audio_generate_tone(440, 2000, 22050) == 0) {
+            terminal_writestring_color("Audio test completed successfully!\n", COLOR_GREEN);
+        } else {
+            terminal_writestring_color("Audio test failed. Make sure AC97 is initialized.\n", COLOR_RED);
+        }
+        return;
+    }
+    
+    // Play WAV file command
+    match = 1;
+    cmd = "play";
+    j = 0;
+    while (cmd[j] != '\0' && args[0][j] != '\0') {
+        if (cmd[j] != args[0][j]) {
+            match = 0;
+            break;
+        }
+        j++;
+    }
+    if (match && cmd[j] == '\0' && args[0][j] == '\0') {
+        // Play WAV file
+        if (arg_count < 2) {
+            terminal_writestring_color("Usage: play <filename.wav>\n", COLOR_YELLOW);
+            return;
+        }
+        
+        // Resolve file path
+        extern fs_node_t* fs_resolve_path(const char* path);
+        extern uint32_t fs_get_file_size(fs_node_t* file);
+        extern int fs_read_file(fs_node_t* file, uint8_t* buffer, uint32_t size);
+        extern void* malloc(uint32_t size);
+        extern void free(void* ptr);
+        
+        fs_node_t* file = fs_resolve_path(args[1]);
+        if (file == NULL || file->type != FS_FILE) {
+            terminal_writestring_color("Error: File not found\n", COLOR_RED);
+            return;
+        }
+        
+        uint32_t file_size = fs_get_file_size(file);
+        if (file_size == 0) {
+            terminal_writestring_color("Error: File is empty\n", COLOR_RED);
+            return;
+        }
+        
+        // Read header first (first 4KB should be enough for WAV header)
+        uint32_t header_size = 4096;
+        if (header_size > file_size) {
+            header_size = file_size;
+        }
+        
+        uint8_t* header_data = malloc(header_size);
+        if (header_data == NULL) {
+            terminal_writestring_color("Error: Out of memory\n", COLOR_RED);
+            return;
+        }
+        
+        if (fs_read_file(file, header_data, header_size) != header_size) {
+            terminal_writestring_color("Error: Failed to read file header\n", COLOR_RED);
+            free(header_data);
+            return;
+        }
+        
+        // Parse WAV header
+        wav_file_t wav;
+        if (wav_parse(header_data, header_size, &wav) != 0) {
+            terminal_writestring_color("Error: Invalid WAV file\n", COLOR_RED);
+            free(header_data);
+            return;
+        }
+        
+        // Display WAV info
+        terminal_writestring("WAV file info:\n");
+        terminal_writestring("  Sample rate: ");
+        // Print sample rate
+        char rate_str[16];
+        int temp = wav.sample_rate;
+        int pos = 0;
+        if (temp == 0) {
+            rate_str[pos++] = '0';
+        } else {
+            char rev[16];
+            int rev_pos = 0;
+            while (temp > 0) {
+                rev[rev_pos++] = '0' + (temp % 10);
+                temp /= 10;
+            }
+            for (int k = rev_pos - 1; k >= 0; k--) {
+                rate_str[pos++] = rev[k];
+            }
+        }
+        rate_str[pos] = '\0';
+        terminal_writestring(rate_str);
+        terminal_writestring(" Hz\n");
+        
+        terminal_writestring("  Channels: ");
+        terminal_putchar('0' + wav.num_channels);
+        terminal_writestring("\n");
+        
+        terminal_writestring("  Bit depth: ");
+        // Print bit depth
+        char bits_str[8];
+        temp = wav.bits_per_sample;
+        pos = 0;
+        if (temp == 0) {
+            bits_str[pos++] = '0';
+        } else {
+            char rev[8];
+            int rev_pos = 0;
+            while (temp > 0) {
+                rev[rev_pos++] = '0' + (temp % 10);
+                temp /= 10;
+            }
+            for (int k = rev_pos - 1; k >= 0; k--) {
+                bits_str[pos++] = rev[k];
+            }
+        }
+        bits_str[pos] = '\0';
+        terminal_writestring(bits_str);
+        terminal_writestring(" bits\n");
+        
+        // Calculate where PCM data starts in the file
+        uint32_t pcm_data_offset = (uint32_t)(wav.pcm_data - header_data);
+        if (pcm_data_offset >= header_size) {
+            // PCM data is not in header buffer, need to read more to find it
+            // Re-read a larger header to find PCM data start
+            free(header_data);
+            uint32_t larger_header = 8192;  // 8KB should be enough
+            if (larger_header > file_size) {
+                larger_header = file_size;
+            }
+            header_data = malloc(larger_header);
+            if (header_data == NULL) {
+                terminal_writestring_color("Error: Out of memory\n", COLOR_RED);
+                return;
+            }
+            if (fs_read_file(file, header_data, larger_header) != larger_header) {
+                terminal_writestring_color("Error: Failed to read file header\n", COLOR_RED);
+                free(header_data);
+                return;
+            }
+            // Re-parse
+            if (wav_parse(header_data, larger_header, &wav) != 0) {
+                terminal_writestring_color("Error: Invalid WAV file\n", COLOR_RED);
+                free(header_data);
+                return;
+            }
+            pcm_data_offset = (uint32_t)(wav.pcm_data - header_data);
+            if (pcm_data_offset >= larger_header) {
+                terminal_writestring_color("Error: PCM data offset too large\n", COLOR_RED);
+                free(header_data);
+                return;
+            }
+        }
+        
+        // Free header data - we'll stream PCM data directly from disk
+        free(header_data);
+        
+        // Stream PCM data in chunks directly from disk
+        // Use 64KB chunks for reading and conversion (enough for ~1 second at 44.1kHz)
+        const uint32_t CHUNK_SIZE = 65536;
+        uint8_t* pcm_chunk = malloc(CHUNK_SIZE);
+        uint8_t* converted_chunk = malloc(CHUNK_SIZE);
+        if (pcm_chunk == NULL || converted_chunk == NULL) {
+            terminal_writestring_color("Error: Out of memory for streaming\n", COLOR_RED);
+            if (pcm_chunk) free(pcm_chunk);
+            if (converted_chunk) free(converted_chunk);
+            return;
+        }
+        
+        terminal_writestring("Streaming audio...\n");
+        terminal_writestring("Total PCM size: ");
+        // Print PCM size
+        char pcm_size_str[16];
+        int pcm_temp = wav.pcm_size;
+        int pcm_pos = 0;
+        if (pcm_temp == 0) {
+            pcm_size_str[pcm_pos++] = '0';
+        } else {
+            char rev[16];
+            int rev_pos = 0;
+            while (pcm_temp > 0) {
+                rev[rev_pos++] = '0' + (pcm_temp % 10);
+                pcm_temp /= 10;
+            }
+            for (int k = rev_pos - 1; k >= 0; k--) {
+                pcm_size_str[pcm_pos++] = rev[k];
+            }
+        }
+        pcm_size_str[pcm_pos] = '\0';
+        terminal_writestring(pcm_size_str);
+        terminal_writestring(" bytes\n");
+        
+        // Stream and play PCM data in chunks
+        extern int fs_read_file_at(fs_node_t* file, uint32_t offset, uint8_t* buffer, uint32_t size);
+        uint32_t pcm_offset = 0;
+        uint32_t chunk_num = 0;
+        
+        terminal_writestring("Starting playback loop...\n");
+        while (pcm_offset < wav.pcm_size) {
+            terminal_writestring("Loop iteration, pcm_offset=");
+            // Print pcm_offset
+            char loop_off_str[16];
+            int loop_off_temp = pcm_offset;
+            int loop_off_pos = 0;
+            if (loop_off_temp == 0) {
+                loop_off_str[loop_off_pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (loop_off_temp > 0) {
+                    rev[rev_pos++] = '0' + (loop_off_temp % 10);
+                    loop_off_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    loop_off_str[loop_off_pos++] = rev[k];
+                }
+            }
+            loop_off_str[loop_off_pos] = '\0';
+            terminal_writestring(loop_off_str);
+            terminal_writestring(", pcm_size=");
+            // Print wav.pcm_size
+            char loop_size_str[16];
+            int loop_size_temp = wav.pcm_size;
+            int loop_size_pos = 0;
+            if (loop_size_temp == 0) {
+                loop_size_str[loop_size_pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (loop_size_temp > 0) {
+                    rev[rev_pos++] = '0' + (loop_size_temp % 10);
+                    loop_size_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    loop_size_str[loop_size_pos++] = rev[k];
+                }
+            }
+            loop_size_str[loop_size_pos] = '\0';
+            terminal_writestring(loop_size_str);
+            terminal_writestring("\n");
+            
+            chunk_num++;
+            uint32_t chunk_size = CHUNK_SIZE;
+            if (chunk_size > (wav.pcm_size - pcm_offset)) {
+                chunk_size = wav.pcm_size - pcm_offset;
+            }
+            
+            // Debug: Show what we're about to read
+            terminal_writestring("Reading chunk ");
+            // Print chunk number
+            char pre_chunk_str[8];
+            int pre_chunk_temp = chunk_num;
+            int pre_chunk_pos = 0;
+            if (pre_chunk_temp == 0) {
+                pre_chunk_str[pre_chunk_pos++] = '0';
+            } else {
+                char rev[8];
+                int rev_pos = 0;
+                while (pre_chunk_temp > 0) {
+                    rev[rev_pos++] = '0' + (pre_chunk_temp % 10);
+                    pre_chunk_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    pre_chunk_str[pre_chunk_pos++] = rev[k];
+                }
+            }
+            pre_chunk_str[pre_chunk_pos] = '\0';
+            terminal_writestring(pre_chunk_str);
+            terminal_writestring(" at offset ");
+            // Print offset
+            char off_str[16];
+            int off_temp = pcm_data_offset + pcm_offset;
+            int off_pos = 0;
+            if (off_temp == 0) {
+                off_str[off_pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (off_temp > 0) {
+                    rev[rev_pos++] = '0' + (off_temp % 10);
+                    off_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    off_str[off_pos++] = rev[k];
+                }
+            }
+            off_str[off_pos] = '\0';
+            terminal_writestring(off_str);
+            terminal_writestring(", size ");
+            // Print chunk_size
+            char size_str[16];
+            int size_temp = chunk_size;
+            int size_pos = 0;
+            if (size_temp == 0) {
+                size_str[size_pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (size_temp > 0) {
+                    rev[rev_pos++] = '0' + (size_temp % 10);
+                    size_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    size_str[size_pos++] = rev[k];
+                }
+            }
+            size_str[size_pos] = '\0';
+            terminal_writestring(size_str);
+            terminal_writestring("...\n");
+            
+            // Read PCM chunk directly from disk at offset
+            int bytes_read = fs_read_file_at(file, pcm_data_offset + pcm_offset, pcm_chunk, chunk_size);
+            if (bytes_read <= 0) {
+                terminal_writestring_color("Error: Failed to read PCM data from disk (returned: ", COLOR_RED);
+                // Print bytes_read
+                char err_str[16];
+                int err_temp = bytes_read;
+                int err_pos = 0;
+                if (err_temp < 0) {
+                    err_str[err_pos++] = '-';
+                    err_temp = -err_temp;
+                }
+                if (err_temp == 0) {
+                    err_str[err_pos++] = '0';
+                } else {
+                    char rev[16];
+                    int rev_pos = 0;
+                    while (err_temp > 0) {
+                        rev[rev_pos++] = '0' + (err_temp % 10);
+                        err_temp /= 10;
+                    }
+                    for (int k = rev_pos - 1; k >= 0; k--) {
+                        err_str[err_pos++] = rev[k];
+                    }
+                }
+                err_str[err_pos] = '\0';
+                terminal_writestring(err_str);
+                terminal_writestring_color(")\n", COLOR_RED);
+                break;
+            }
+            
+            // Create temporary wav structure for this chunk
+            wav_file_t chunk_wav = wav;
+            chunk_wav.pcm_data = pcm_chunk;
+            chunk_wav.pcm_size = bytes_read;
+            
+            // Convert chunk to 8-bit mono
+            uint32_t samples_in_chunk = wav_convert_to_8bit_mono(&chunk_wav, converted_chunk, CHUNK_SIZE);
+            if (samples_in_chunk == 0) {
+                terminal_writestring_color("Error: Failed to convert audio chunk\n", COLOR_RED);
+                break;
+            }
+            
+            // Play this chunk
+            terminal_writestring("Playing chunk ");
+            // Print chunk number
+            char chunk_str[8];
+            int chunk_temp = chunk_num;
+            int chunk_pos = 0;
+            if (chunk_temp == 0) {
+                chunk_str[chunk_pos++] = '0';
+            } else {
+                char rev[8];
+                int rev_pos = 0;
+                while (chunk_temp > 0) {
+                    rev[rev_pos++] = '0' + (chunk_temp % 10);
+                    chunk_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    chunk_str[chunk_pos++] = rev[k];
+                }
+            }
+            chunk_str[chunk_pos] = '\0';
+            terminal_writestring(chunk_str);
+            terminal_writestring(" (");
+            // Print bytes_read
+            char bytes_str[16];
+            int bytes_temp = bytes_read;
+            int bytes_pos = 0;
+            if (bytes_temp == 0) {
+                bytes_str[bytes_pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (bytes_temp > 0) {
+                    rev[rev_pos++] = '0' + (bytes_temp % 10);
+                    bytes_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    bytes_str[bytes_pos++] = rev[k];
+                }
+            }
+            bytes_str[bytes_pos] = '\0';
+            terminal_writestring(bytes_str);
+            terminal_writestring(" bytes, ");
+            // Print samples
+            char samples_str[16];
+            int samples_temp = samples_in_chunk;
+            int samples_pos = 0;
+            if (samples_temp == 0) {
+                samples_str[samples_pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (samples_temp > 0) {
+                    rev[rev_pos++] = '0' + (samples_temp % 10);
+                    samples_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    samples_str[samples_pos++] = rev[k];
+                }
+            }
+            samples_str[samples_pos] = '\0';
+            terminal_writestring(samples_str);
+            terminal_writestring(" samples)...\n");
+            
+            terminal_writestring("Calling ac97_play_pcm...\n");
+            if (ac97_play_pcm(converted_chunk, samples_in_chunk, wav.sample_rate) != 0) {
+                terminal_writestring_color("Error: Playback failed\n", COLOR_RED);
+                break;
+            }
+            terminal_writestring("ac97_play_pcm returned, continuing loop...\n");
+            
+            pcm_offset += bytes_read;
+            
+            // Debug: Show progress
+            terminal_writestring("Progress: ");
+            // Print pcm_offset
+            char prog_str[16];
+            int prog_temp = pcm_offset;
+            int prog_pos = 0;
+            if (prog_temp == 0) {
+                prog_str[prog_pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (prog_temp > 0) {
+                    rev[rev_pos++] = '0' + (prog_temp % 10);
+                    prog_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    prog_str[prog_pos++] = rev[k];
+                }
+            }
+            prog_str[prog_pos] = '\0';
+            terminal_writestring(prog_str);
+            terminal_writestring(" / ");
+            // Print wav.pcm_size
+            char total_str[16];
+            int total_temp = wav.pcm_size;
+            int total_pos = 0;
+            if (total_temp == 0) {
+                total_str[total_pos++] = '0';
+            } else {
+                char rev[16];
+                int rev_pos = 0;
+                while (total_temp > 0) {
+                    rev[rev_pos++] = '0' + (total_temp % 10);
+                    total_temp /= 10;
+                }
+                for (int k = rev_pos - 1; k >= 0; k--) {
+                    total_str[total_pos++] = rev[k];
+                }
+            }
+            total_str[total_pos] = '\0';
+            terminal_writestring(total_str);
+            terminal_writestring(" bytes\n");
+        }
+        
+        terminal_writestring_color("Playback completed!\n", COLOR_GREEN);
+        
+        // Cleanup
+        free(pcm_chunk);
+        free(converted_chunk);
         return;
     }
     

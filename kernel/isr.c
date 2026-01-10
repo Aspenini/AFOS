@@ -1,5 +1,6 @@
 #include "isr.h"
 #include "keyboard.h"
+#include "pit.h"
 #include "types.h"
 
 // Array of ISR handlers
@@ -15,6 +16,12 @@ void irq_handler(uint32_t irq_num) {
     // Handle specific IRQ
     if (irq_num >= 32 && irq_num <= 47) {
         uint8_t irq = irq_num - 32;
+        
+        // Handle timer (IRQ0)
+        if (irq == 0) {
+            extern void pit_timer_handler(void);
+            pit_timer_handler();
+        }
         
         // Handle keyboard (IRQ1)
         if (irq == 1) {
@@ -84,6 +91,16 @@ void pic_init(void) {
     // Mask all interrupts initially
     __asm__ volatile("mov $0xFF, %%al\n\tout %%al, $0x21\n\t" ::: "al");
     __asm__ volatile("mov $0xFF, %%al\n\tout %%al, $0xA1\n\t" ::: "al");
+    
+    // Enable IRQ0 (timer) - clear bit 0
+    __asm__ volatile(
+        "inb $0x21, %%al\n\t"
+        "and $0xFE, %%al\n\t"  // Clear bit 0 (timer)
+        "out %%al, $0x21\n\t"
+        :
+        :
+        : "al"
+    );
     
     // Enable IRQ1 (keyboard) - clear bit 1
     __asm__ volatile(
