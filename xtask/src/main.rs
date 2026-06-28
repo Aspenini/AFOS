@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env, fs,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
@@ -95,6 +96,7 @@ fn parse_arch(value: Option<&str>) -> Result<UefiArch> {
 }
 
 fn check_all() -> Result<()> {
+    check_docs()?;
     cargo(&["fmt", "--all", "--", "--check"])?;
     cargo(&["test", "--workspace"])?;
     cargo(&[
@@ -119,6 +121,71 @@ fn check_all() -> Result<()> {
         "--target",
         "wasm32-unknown-unknown",
     ])
+}
+
+fn check_docs() -> Result<()> {
+    let root = workspace_root();
+    let docs_dir = root.join("docs");
+    let mut pages = vec![docs_dir.join("index.md"), docs_dir.join("404.md")];
+    for entry in fs::read_dir(&docs_dir).map_err(display_error)? {
+        let path = entry.map_err(display_error)?.path();
+        if path.extension().is_some_and(|extension| extension == "md")
+            && !matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("index.md" | "404.md")
+            )
+        {
+            pages.push(path);
+        }
+    }
+
+    let mut permalinks = BTreeSet::new();
+    let mut contents = Vec::new();
+    for page in pages {
+        let content = fs::read_to_string(&page).map_err(display_error)?;
+        let front_matter = content
+            .strip_prefix("---\n")
+            .and_then(|rest| rest.split_once("\n---\n").map(|(front, _)| front))
+            .ok_or_else(|| format!("{} has no valid YAML front matter", page.display()))?;
+        if !front_matter.lines().any(|line| line.starts_with("title:")) {
+            return Err(format!("{} has no title", page.display()));
+        }
+        let permalink = front_matter
+            .lines()
+            .find_map(|line| line.strip_prefix("permalink:").map(str::trim))
+            .ok_or_else(|| format!("{} has no permalink", page.display()))?;
+        if !permalinks.insert(permalink.to_owned()) {
+            return Err(format!("duplicate documentation permalink: {permalink}"));
+        }
+        if page.file_name().is_some_and(|name| name != "404.md")
+            && !content.contains("{% include nav.md %}")
+        {
+            return Err(format!(
+                "{} does not include site navigation",
+                page.display()
+            ));
+        }
+        contents.push((page, content));
+    }
+
+    for (page, content) in contents {
+        let mut remainder = content.as_str();
+        while let Some(start) = remainder.find("{{ '") {
+            remainder = &remainder[start + 4..];
+            let Some(end) = remainder.find("' | relative_url }}") else {
+                return Err(format!("{} has a malformed relative_url", page.display()));
+            };
+            let target = &remainder[..end];
+            if !permalinks.contains(target) {
+                return Err(format!(
+                    "{} links to undocumented permalink {target}",
+                    page.display()
+                ));
+            }
+            remainder = &remainder[end + 19..];
+        }
+    }
+    Ok(())
 }
 
 fn package(arch: UefiArch) -> Result<()> {

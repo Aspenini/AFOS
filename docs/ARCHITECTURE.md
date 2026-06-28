@@ -1,3 +1,11 @@
+---
+title: Architecture
+description: How AFOS shares system logic across desktop and UEFI backends.
+permalink: /architecture/
+---
+
+{% include nav.md %}
+
 # Architecture
 
 AFOS is an application environment, not a monolithic hardware kernel.
@@ -19,6 +27,25 @@ Platform trait
       └── UEFI adapter (x86_64 and AArch64)
 ```
 
+The same command on desktop and UEFI goes through the same parser,
+application resolver, permission policy, path normalization, and Rhai
+runtime. A backend does not reimplement those behaviors.
+
+## Shared versus platform-specific
+
+| Shared AFOS core | Platform backend |
+| --- | --- |
+| Shell parsing and current directory | Terminal input and output |
+| App lookup and runtime dispatch | Persistent byte storage |
+| `/sys`, `/apps`, and `/user` semantics | Monotonic time |
+| Path normalization and mount routing | Secure random bytes |
+| Capability declarations and prompts | Platform and architecture identity |
+| Password verification and rate limiting | Cancellation input |
+| Rhai limits and System API bindings | Target entry point and packaging |
+
+The backend receives normalized storage paths. It does not decide which paths
+an app may access; the shared core makes that decision first.
+
 ## Workspace
 
 - `afos-api` contains the public `no_std` contracts and shared types.
@@ -32,6 +59,9 @@ Platform trait
 
 Only platform crates may depend on host or firmware APIs. Shared crates compile
 for native targets, UEFI targets, and `wasm32-unknown-unknown`.
+
+The browser build currently proves that shared crates do not accidentally
+depend on desktop or UEFI APIs. It is not yet a runnable web frontend.
 
 ## Execution model
 
@@ -52,6 +82,9 @@ Rhai runs with:
 Recoverable failures use `afos_api::Error`; platform and application errors do
 not intentionally panic.
 
+Execution is cooperative. AFOS does not currently provide processes, threads,
+background jobs, or preemptive scheduling.
+
 ## Virtual filesystem
 
 `/sys` is a compile-time table of embedded bytes and is never delegated to a
@@ -63,3 +96,6 @@ The desktop adapter canonicalizes existing paths, canonicalizes writable
 parents, and rejects writable symbolic-link targets. UEFI FAT filesystems do
 not support symbolic links.
 
+See [Filesystem and persistence]({{ '/filesystem/' | relative_url }}) for
+the user-facing paths and [Porting AFOS]({{ '/porting/' | relative_url }})
+for the backend contract.

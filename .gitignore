@@ -1,6 +1,8 @@
 # Rust and AFOS build output
 /target/
 /dist/
+/docs/_site/
+/docs/.jekyll-cache/
 
 # Generated firmware and emulator artifacts
 *.efi

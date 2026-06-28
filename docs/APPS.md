@@ -1,3 +1,11 @@
+---
+title: Writing applications
+description: Build portable single-file Rhai applications for AFOS.
+permalink: /apps/
+---
+
+{% include nav.md %}
+
 # AFOS applications
 
 Applications are UTF-8, single-file interpreted programs. Rhai (`.rhai`) is
@@ -7,6 +15,19 @@ Copy installed applications to `/apps`. Immutable applications shipped with
 AFOS live in `/sys/apps`. Commands search `/sys/apps` before `/apps`, so an
 installed file cannot silently replace a system command. Use an explicit path
 such as `/apps/example.rhai` when names conflict.
+
+## Minimal application
+
+Create `hello.rhai`:
+
+```rhai
+print("Hello from AFOS!");
+0
+```
+
+Copy it into the persistent apps directory. It appears as
+`/apps/hello.rhai` and can be run as `hello`. If a bundled app already has
+that name, use the explicit path `/apps/hello.rhai`.
 
 ## Header directives
 
@@ -34,6 +55,31 @@ and private storage under `/user/appdata/<app-id>`. Installed apps must declare
 all other operations and receive a confirmation/password prompt for every
 protected call.
 
+Bundled `/sys/apps` scripts are immutable and trusted. Their declared
+capabilities are granted without prompts. Merely placing a script under
+`/apps` never makes it trusted.
+
+## Private state example
+
+Appdata is appropriate for state owned by one application:
+
+```rhai
+let count = 0;
+try {
+    count = appdata_read("launches.txt").to_int();
+} catch {
+    // First launch.
+}
+
+count += 1;
+appdata_write("launches.txt", count.to_string());
+print("Launch " + count);
+0
+```
+
+Use `/user/saves` when a file belongs to the user. See
+[Filesystem and persistence]({{ '/filesystem/' | relative_url }}).
+
 ## Rhai System API
 
 | Function | Result |
@@ -56,6 +102,9 @@ protected call.
 The final script value is its integer exit status. A script returning `()` or
 no value exits successfully.
 
+Denied capabilities, host I/O failures, parse failures, and resource limits
+become Rhai runtime errors and nonzero command results.
+
 ## Adding another interpreter
 
 Implement `afos_api::AppRuntime`, choose a unique extension, and register it
@@ -63,3 +112,5 @@ with `RuntimeRegistry`. The adapter must expose the same API version and route
 every system operation through `SystemApi`; it must not access platform
 storage directly.
 
+AFOS uses the official `rhai` crate pinned in `Cargo.lock`. AFOS provides host
+functions and limits but does not maintain a custom Rhai interpreter.

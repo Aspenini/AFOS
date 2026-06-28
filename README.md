@@ -71,6 +71,9 @@ that loaded AFOS.
 
 ## Documentation
 
+- [Documentation website](https://aspenini.github.io/AFOS/)
+- [Getting started](docs/GETTING_STARTED.md)
+- [Filesystem and persistence](docs/FILESYSTEM.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Writing applications](docs/APPS.md)
 - [Security model](docs/SECURITY.md)

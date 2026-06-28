@@ -1,3 +1,11 @@
+---
+title: Security model
+description: AFOS capability checks, passwords, trust boundaries, and limitations.
+permalink: /security/
+---
+
+{% include nav.md %}
+
 # Security model
 
 AFOS capability checks isolate interpreted applications from system services.
@@ -19,6 +27,21 @@ malicious firmware, or replacement of the AFOS executable.
 - `/user/config/security` is blocked from every application, including trusted
   scripts.
 
+## Installed-app authorization
+
+For each protected operation, AFOS:
+
+1. normalizes the requested path;
+2. rejects protected system paths;
+3. verifies that the script declared a matching capability;
+4. displays the app ID, operation, and resource;
+5. asks the user to approve that operation once;
+6. verifies the master password when configured;
+7. performs only that operation.
+
+AFOS repeats the process for the next protected operation. Approval is not
+cached or written to disk.
+
 ## Master password
 
 First-run setup offers an optional master password. AFOS stores an Argon2id
@@ -31,6 +54,9 @@ requires the current one.
 UEFI firmware must expose the RNG protocol to configure a password. AFOS
 returns an error rather than silently generating a weak salt when it does not.
 
+The password controls AFOS API access. It does not encrypt `/user`, hide
+filenames, or make a removable FAT volume confidential.
+
 ## Limitations
 
 Desktop users or physical attackers who can edit the underlying data directory
@@ -39,3 +65,5 @@ encrypted storage are separate deployment concerns. Rhai resource limits
 reduce accidental or malicious denial of service but do not provide process
 or memory isolation equivalent to an operating-system process boundary.
 
+See [Filesystem and persistence]({{ '/filesystem/' | relative_url }}) for
+path ownership and the difference between saves and appdata.
