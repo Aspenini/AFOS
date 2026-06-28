@@ -1,15 +1,14 @@
 // afos:api=1
-// afos:id=afos.touch
+// afos:id=afos.mkdir
 // afos:capabilities=fs.write:/
 
 let values = args();
 if values.len < 2 {
-    print("usage: touch <file>...");
+    print("usage: mkdir <directory>...");
     2
 } else {
     for index in 1..values.len {
-        fs_write(values[index], "");
+        fs_mkdir(values[index]);
     }
     0
 }
-

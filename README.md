@@ -17,11 +17,19 @@ on the platform storage backend.
 | AArch64 bare metal | Limine ELF/ISO, QEMU-tested |
 | `wasm32-unknown-unknown` shared crates | Compile-checked; browser frontend deferred |
 
-Bare-metal builds produce a replaceable kernel ELF and `system.tar`. Limine
-loads both files from the ISO into memory, so bundled Rhai applications and
-other `/sys` data can be updated without embedding them into the kernel.
-Desktop release packages place the same files under
-`dist/desktop/share/afos/sys`.
+Every release uses the same bundle layout:
+
+```text
+<target>/
+├── boot/afos[.elf|.exe]
+└── fs/
+    ├── sys/
+    ├── apps/
+    └── user/
+```
+
+Desktop mounts `fs/` directly. Bare-metal ISOs keep the same tree; Limine
+loads each file into memory with its AFOS path before starting the kernel.
 
 ## Quick start
 
@@ -38,7 +46,7 @@ cargo run -- --ephemeral --command hello
 # Run all checks
 cargo xtask check
 
-# Build desktop, kernel ELFs, system.tar, and Limine ISOs
+# Build the desktop and both bare-metal bundles
 cargo xtask build all
 
 # Run interactively in QEMU
@@ -50,9 +58,8 @@ cargo xtask smoke x86_64
 cargo xtask smoke aarch64
 ```
 
-`cargo xtask run` requires QEMU and xorriso. AArch64 packaging additionally
-uses mtools and EDK2 firmware. Limine is downloaded at its pinned version and
-verified on the first package build. See
+`cargo xtask run` requires QEMU, EDK2 firmware, xorriso, and mtools. Limine is
+downloaded at its pinned version and verified on the first package build. See
 [docs/BARE_METAL.md](docs/BARE_METAL.md).
 
 With [`just`](https://github.com/casey/just) installed, the common development
@@ -81,9 +88,14 @@ just check
     └── appdata/<app-id>/ private application storage
 ```
 
-On desktop, persistent files use `--data-dir`, `AFOS_DATA_DIR`, or the
-platform application-data directory. Bare metal currently uses a RAM-backed
-overlay for `/apps` and `/user`; `/sys` is loaded from `system.tar`.
+Packaged desktop builds persist directly in their adjacent `fs/` directory.
+`--data-dir` and `AFOS_DATA_DIR` can override that location. Bare metal loads
+the initial `fs/` files through Limine and currently keeps changes to `/apps`
+and `/user` in RAM.
+Bare-metal packages now also preserve a separate `afos-data.img` and the
+workspace contains the portable snapshot-storage layer. Hardware-backed
+mounting remains experimental, so normal builds do not claim reboot
+persistence yet.
 
 ## Documentation
 

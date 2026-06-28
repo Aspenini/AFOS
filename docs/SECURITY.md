@@ -14,7 +14,7 @@ malicious firmware, or replacement of the AFOS executable.
 
 ## Trust boundaries
 
-- `/sys` and `/sys/apps` are loaded from the read-only system image and cannot
+- `/sys` and `/sys/apps` are loaded from read-only bundle files and cannot
   be written through the VFS.
 - Bundled system applications are trusted and automatically receive the
   capabilities declared in their source.
@@ -51,9 +51,10 @@ Three failed attempts activate an increasing delay, capped at 32 seconds.
 `passwd` changes or disables the password. Changing an existing password
 requires the current one.
 
-The current bare-metal backend has no hardware entropy driver, so password
-creation is disabled there. AFOS returns an error rather than silently
-generating a weak salt. Desktop uses the host operating system's entropy.
+Desktop uses the host operating system's entropy. x86_64 bare metal uses
+RDRAND only after checking CPU support and retrying failed samples. The
+experimental VirtIO RNG backend is not enabled by default, so AArch64 password
+creation still returns an error rather than silently generating a weak salt.
 
 The password controls AFOS API access. It does not encrypt `/user`, hide
 filenames, or encrypt underlying storage.

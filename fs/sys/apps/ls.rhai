@@ -8,4 +8,3 @@ for entry in fs_list(path) {
     print(entry);
 }
 0
-

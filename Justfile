@@ -47,12 +47,12 @@ check:
 build:
     cargo xtask build all
 
-# Build the x86_64 kernel ELF, system image, and Limine ISO.
+# Build the x86_64 boot/fs bundle and Limine ISO.
 [group('Build')]
 build-x86_64:
     cargo xtask package x86_64
 
-# Build the AArch64 kernel ELF, system image, and Limine ISO.
+# Build the AArch64 boot/fs bundle and Limine ISO.
 [group('Build')]
 build-arm64:
     cargo xtask package aarch64

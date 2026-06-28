@@ -3,4 +3,3 @@
 
 print("Hello from a portable AFOS Rhai application!");
 0
-

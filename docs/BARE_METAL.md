@@ -19,21 +19,29 @@ Two architectures are packaged:
 
 ## Disk and memory layout
 
-Each build produces three replaceable files:
+All targets use the same relative layout:
 
 ```text
 dist/
-├── afos-<architecture>.elf   standalone kernel executable
-├── afos-<architecture>.iso   Limine bootable image
-└── system.tar                /sys files and bundled Rhai applications
+├── x86_64/
+│   ├── boot/afos.elf
+│   ├── fs/{sys,apps,user}/
+│   ├── afos.iso
+│   └── afos-data.img
+├── aarch64/
+│   └── ...
+└── desktop/
+    ├── boot/afos[.exe]
+    └── fs/{sys,apps,user}/
 ```
 
-Inside the ISO, Limine reads `/boot/afos.elf` and `/boot/system.tar`. It loads
-the ELF segments and system module into memory before transferring control to
-the kernel. This keeps updateable policy and applications out of the kernel:
+Inside an ISO, Limine reads `/boot/afos.elf` and each individual file under
+`/fs`. It loads the ELF segments and tags every file module with its AFOS path
+before transferring control to the kernel. This keeps updateable policy and
+applications out of the kernel:
 
 - replace the ELF to update kernel and shared Rust logic;
-- replace `system.tar` to update bundled scripts and other `/sys` files;
+- replace individual files under `fs/` to update applications or defaults;
 - replace Limine files to update the bootloader.
 
 The packaging command regenerates the ISO after any replacement. No standalone
@@ -41,17 +49,21 @@ EFI directory or FAT disk image is emitted. UEFI boot still requires Limine's
 architecture-specific firmware loader inside the ISO; that is an internal
 bootloader detail rather than the AFOS kernel format.
 
+`afos-data.img` is a separate sparse writable-data image. Repackaging preserves
+an existing image. The default kernel does not mount it yet; it is the stable
+artifact boundary for the in-progress block-storage backend.
+
 ## Host requirements
 
 - nightly Rust and the targets in `rust-toolchain.toml`
 - QEMU for interactive and smoke tests
 - xorriso
-- curl, tar, make, and a C compiler to provision the pinned Limine release
-- mtools for the internal AArch64 UEFI El Torito boot image
-- EDK2 firmware for AArch64 QEMU
+- curl and tar to provision the pinned Limine release
+- mtools for the internal UEFI El Torito boot images
+- EDK2 firmware for QEMU
 
 The first package build downloads Limine 12.3.3, verifies its SHA-256 digest,
-and builds the portable Limine host tool under `target/`.
+and extracts its architecture-specific UEFI loaders under `target/`.
 
 ## Build
 
@@ -77,12 +89,14 @@ just x86_64
 just arm64
 ```
 
-The x86_64 ISO supports both legacy BIOS and UEFI Limine boot. The AArch64 ISO
-uses Limine under UEFI. QEMU uses a framebuffer and serial console; the shell
-accepts serial input on both architectures and PS/2 keyboard input on x86_64.
+Both ISOs use Limine under UEFI. QEMU uses a framebuffer and serial console;
+the shell accepts serial input on both architectures and PS/2 keyboard input
+on x86_64.
 
-For non-Homebrew AArch64 firmware installations, set:
+For non-Homebrew firmware installations, set:
 
+- `AFOS_X86_64_CODE`
+- `AFOS_X86_64_VARS`
 - `AFOS_AARCH64_CODE`
 - `AFOS_AARCH64_VARS`
 
@@ -97,23 +111,33 @@ just test-arm64
 just test-bare-metal
 ```
 
-The smoke harness boots each ISO and waits until the shared AFOS shell prompt
-appears on its serial console.
+The smoke harness boots each ISO through UEFI, sends `hello` over the serial
+console, and verifies the bundled Rhai application output.
 
 ## Filesystem behavior
 
-`/sys` is parsed from `system.tar` and remains read-only. `/apps` and `/user`
-currently use an in-memory filesystem on bare metal. Changes survive for the
-current boot but are not persistent because AFOS does not yet have a block
-device and writable filesystem driver.
+Files tagged `/sys/...` become the read-only system tree. Initial `/apps` and
+`/user` files are copied into an in-memory writable filesystem. Changes
+survive for the current boot but are not persistent in the default build.
 
-Desktop persistence is unchanged. Adding persistent bare-metal storage is a
-platform-backend task and does not require changing the shell, VFS policy,
-authorization, or application runtime.
+The shared `afos-storage` crate now provides a 512-byte block-device trait and
+an atomic two-slot snapshot store with generation selection and checksums.
+Experimental VirtIO block and RNG drivers compile for both kernel targets
+behind the `experimental-virtio` feature. They remain disabled because x86_64
+legacy queue completion and AArch64 device-MMIO page mappings still need to be
+finished and covered by reboot tests.
+
+The kernel heap is no longer a fixed static array. It selects an aligned usable
+region from Limine's memory map and currently caps the selected heap at 128
+MiB.
+
+Desktop mounts its adjacent `fs/` tree directly, so the same paths persist
+there. Adding persistent bare-metal storage is a platform-backend task and
+does not require changing shell, VFS, authorization, or runtime logic.
 
 ## Updating an image
 
-Edit files under `assets/sys/` to update the system image, or rebuild the
-kernel after Rust changes, then rerun the architecture's package command.
-Limine resolves the kernel and module by their filesystem paths, so neither is
-compiled into the bootloader.
+Edit files under the repository's `fs/` directory or rebuild the kernel after
+Rust changes, then rerun the architecture's package command. `xtask`
+regenerates Limine's module list from the files present. The kernel and
+filesystem content remain separate update units.

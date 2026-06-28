@@ -10,4 +10,3 @@ if values.len != 3 {
     fs_write(values[2], fs_read(values[1]));
     0
 }
-

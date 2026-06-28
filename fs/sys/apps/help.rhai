@@ -24,4 +24,3 @@ if installed.len > 0 {
     }
 }
 0
-

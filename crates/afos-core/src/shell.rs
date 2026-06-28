@@ -45,7 +45,7 @@ impl<P: Platform> Afos<P> {
     #[must_use]
     pub fn with_system_files(platform: P, files: &'static [EmbeddedFile]) -> Self {
         Self {
-            system: System::with_vfs(Vfs::with_embedded(platform, files)),
+            system: System::with_vfs(Vfs::with_system_files(platform, files)),
             runtimes: RuntimeRegistry::new(),
             cwd: String::from("/user"),
         }

@@ -4,7 +4,7 @@ use std::{
     env,
     fmt::Write as _,
     fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     thread,
@@ -15,6 +15,7 @@ type Result<T> = std::result::Result<T, String>;
 
 const LIMINE_VERSION: &str = "12.3.3";
 const LIMINE_SHA256: &str = "205f98218bb0d5a8ccabf5f903dba9d935f7b0aa66f4262a99b0f5a8e668ec6d";
+const DATA_DISK_SIZE: u64 = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 enum BareMetalArch {
@@ -93,12 +94,9 @@ fn package_desktop() -> Result<()> {
     let executable_name = format!("afos{}", env::consts::EXE_SUFFIX);
     copy(
         &root.join("target").join("release").join(&executable_name),
-        &package.join(executable_name),
+        &package.join("boot").join(executable_name),
     )?;
-    copy_directory(
-        &root.join("assets").join("sys"),
-        &package.join("share").join("afos").join("sys"),
-    )?;
+    prepare_bundle_filesystem(&package)?;
     println!("desktop {}", package.display());
     Ok(())
 }
@@ -124,71 +122,59 @@ fn package(arch: BareMetalArch) -> Result<()> {
     ])?;
 
     let root = workspace_root();
-    let dist = root.join("dist");
-    fs::create_dir_all(&dist).map_err(display_error)?;
+    let package = root.join("dist").join(arch.label());
+    fs::create_dir_all(&package).map_err(display_error)?;
+    recreate_directory(&package.join("boot"))?;
+    recreate_directory(&package.join("fs"))?;
     let source = root
         .join("target")
         .join(arch.target())
         .join("release")
         .join("afos-kernel");
-    let kernel = dist.join(format!("afos-{}.elf", arch.label()));
+    let kernel = package.join("boot").join("afos.elf");
     copy(&source, &kernel)?;
-
-    let system_image = dist.join("system.tar");
-    build_system_image(&system_image)?;
+    prepare_bundle_filesystem(&package)?;
 
     let staging = root
         .join("target")
         .join(format!("afos-{}-iso", arch.label()));
     recreate_directory(&staging)?;
+    copy_directory(&package.join("boot"), &staging.join("boot"))?;
+    copy_directory(&package.join("fs"), &staging.join("fs"))?;
     let boot = staging.join("boot");
     let limine_boot = boot.join("limine");
     fs::create_dir_all(&limine_boot).map_err(display_error)?;
 
-    copy(&kernel, &boot.join("afos.elf"))?;
-    copy(&system_image, &boot.join("system.tar"))?;
-    if matches!(arch, BareMetalArch::X86_64) {
-        for file in [
-            "limine-bios-cd.bin",
-            "limine-uefi-cd.bin",
-            "limine-bios.sys",
-        ] {
-            copy(&limine.join(file), &limine_boot.join(file))?;
-        }
-    }
-    fs::write(staging.join("limine.conf"), limine_config()).map_err(display_error)?;
+    let filesystem_files = bundle_files(&staging.join("fs"))?;
+    fs::write(
+        staging.join("limine.conf"),
+        limine_config(&filesystem_files),
+    )
+    .map_err(display_error)?;
 
-    let iso = dist.join(format!("afos-{}.iso", arch.label()));
+    let iso = package.join("afos.iso");
     if iso.exists() {
         fs::remove_file(&iso).map_err(display_error)?;
     }
+    executable("mformat")?;
+    executable("mmd")?;
+    executable("mcopy")?;
+    let (bootloader_name, boot_image_name) = match arch {
+        BareMetalArch::X86_64 => ("BOOTX64.EFI", "limine-x86_64-cd.bin"),
+        BareMetalArch::Aarch64 => ("BOOTAA64.EFI", "limine-aarch64-cd.bin"),
+    };
+    let bootloader = limine.join(bootloader_name);
+    let boot_image = limine_boot.join(boot_image_name);
+    create_uefi_boot_image(&boot_image, &bootloader, bootloader_name)?;
+    copy(
+        &bootloader,
+        &staging.join("EFI").join("BOOT").join(bootloader_name),
+    )?;
+
     let mut xorriso = Command::new("xorriso");
-    xorriso.args(["-as", "mkisofs", "-R", "-r", "-J"]);
-    match arch {
-        BareMetalArch::X86_64 => {
-            xorriso.args([
-                "-b",
-                "boot/limine/limine-bios-cd.bin",
-                "-no-emul-boot",
-                "-boot-load-size",
-                "4",
-                "-boot-info-table",
-                "-hfsplus",
-                "-apm-block-size",
-                "2048",
-                "--efi-boot",
-                "boot/limine/limine-uefi-cd.bin",
-            ]);
-        }
-        BareMetalArch::Aarch64 => {
-            executable("mformat")?;
-            executable("mmd")?;
-            executable("mcopy")?;
-            let boot_image = limine_boot.join("limine-aarch64-cd.bin");
-            create_aarch64_boot_image(&boot_image, &limine.join("BOOTAA64.EFI"))?;
-            xorriso.args(["--efi-boot", "boot/limine/limine-aarch64-cd.bin"]);
-        }
-    }
+    xorriso
+        .args(["-as", "mkisofs", "-R", "-r", "-J", "--efi-boot"])
+        .arg(format!("boot/limine/{boot_image_name}"));
     xorriso
         .args([
             "-efi-boot-part",
@@ -199,21 +185,25 @@ fn package(arch: BareMetalArch) -> Result<()> {
         .args(["-o"])
         .arg(&iso);
     run_command(&mut xorriso)?;
-    if matches!(arch, BareMetalArch::X86_64) {
-        run_command(
-            Command::new(limine.join("limine"))
-                .args(["bios-install"])
-                .arg(&iso),
-        )?;
-    }
+    let data_disk = package.join("afos-data.img");
+    ensure_data_disk(&data_disk)?;
 
+    println!("bundle  {}", package.display());
     println!("kernel  {}", kernel.display());
-    println!("system  {}", system_image.display());
     println!("iso     {}", iso.display());
+    println!("data    {}", data_disk.display());
     Ok(())
 }
 
-fn create_aarch64_boot_image(image: &Path, bootloader: &Path) -> Result<()> {
+fn ensure_data_disk(path: &Path) -> Result<()> {
+    if path.is_file() {
+        return Ok(());
+    }
+    let file = fs::File::create(path).map_err(display_error)?;
+    file.set_len(DATA_DISK_SIZE).map_err(display_error)
+}
+
+fn create_uefi_boot_image(image: &Path, bootloader: &Path, boot_name: &str) -> Result<()> {
     let file = fs::File::create(image).map_err(display_error)?;
     file.set_len(4 * 1024 * 1024).map_err(display_error)?;
     run_command(
@@ -230,34 +220,39 @@ fn create_aarch64_boot_image(image: &Path, bootloader: &Path) -> Result<()> {
             .args(["-i"])
             .arg(image)
             .arg(bootloader)
-            .arg("::/EFI/BOOT/BOOTAA64.EFI"),
+            .arg(format!("::/EFI/BOOT/{boot_name}")),
     )
 }
 
-fn limine_config() -> &'static str {
-    "timeout: 0\n\
-     quiet: yes\n\
-     serial: yes\n\
-     interface_branding: AFOS\n\
-     \n\
-     /AFOS\n\
-     protocol: limine\n\
-     path: boot():/boot/afos.elf\n\
-     module_path: boot():/boot/system.tar\n\
-     module_string: afos-system\n"
+fn limine_config(files: &[String]) -> String {
+    let mut config = String::from(
+        "timeout: 0\n\
+         quiet: yes\n\
+         serial: yes\n\
+         interface_branding: AFOS\n\
+         \n\
+         /AFOS\n\
+         protocol: limine\n\
+         path: boot():/boot/afos.elf\n",
+    );
+    for file in files {
+        let virtual_path = file.strip_prefix("fs").unwrap_or(file);
+        writeln!(&mut config, "module_path: boot():/{file}").expect("writing to String");
+        writeln!(&mut config, "module_string: afos-file:{virtual_path}")
+            .expect("writing to String");
+    }
+    config
 }
 
 fn ensure_limine() -> Result<PathBuf> {
     let root = workspace_root();
     let cache = root.join("target").join(format!("limine-{LIMINE_VERSION}"));
-    let tool = cache.join("limine");
-    if tool.is_file() {
+    if cache.join("BOOTX64.EFI").is_file() && cache.join("BOOTAA64.EFI").is_file() {
         return Ok(cache);
     }
 
     executable("curl")?;
     executable("tar")?;
-    executable("make")?;
     recreate_directory(&cache)?;
     let archive = root
         .join("target")
@@ -280,9 +275,8 @@ fn ensure_limine() -> Result<PathBuf> {
             .arg(&cache)
             .arg("--strip-components=1"),
     )?;
-    run_command(Command::new("make").arg("-C").arg(&cache))?;
-    if !tool.is_file() {
-        return Err(String::from("Limine host tool was not built"));
+    if !cache.join("BOOTX64.EFI").is_file() || !cache.join("BOOTAA64.EFI").is_file() {
+        return Err(String::from("Limine UEFI bootloaders were not extracted"));
     }
     Ok(cache)
 }
@@ -312,40 +306,49 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
     }
 }
 
-fn build_system_image(destination: &Path) -> Result<()> {
-    let root = workspace_root().join("assets").join("sys");
+fn bundle_files(root: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
-    collect_files(&root, &mut files)?;
+    collect_files(root, &mut files)?;
     files.sort();
-
-    let output = fs::File::create(destination).map_err(display_error)?;
-    let mut archive = tar::Builder::new(output);
-    archive.mode(tar::HeaderMode::Deterministic);
+    let mut names = Vec::with_capacity(files.len());
     for path in files {
-        let relative = path.strip_prefix(&root).map_err(display_error)?;
-        let archive_path = Path::new("sys").join(relative);
-        let data = fs::read(&path).map_err(display_error)?;
-        let mut header = tar::Header::new_ustar();
-        header.set_size(u64::try_from(data.len()).map_err(display_error)?);
-        header.set_mode(0o444);
-        header.set_uid(0);
-        header.set_gid(0);
-        header.set_mtime(0);
-        header.set_cksum();
-        archive
-            .append_data(&mut header, archive_path, data.as_slice())
-            .map_err(display_error)?;
+        let relative = path.strip_prefix(root).map_err(display_error)?;
+        let relative = relative
+            .to_str()
+            .ok_or_else(|| format!("non-UTF-8 filesystem path: {}", path.display()))?
+            .replace('\\', "/");
+        if relative.contains(['\n', '\r', '\0']) {
+            return Err(format!("unsupported filesystem path: {}", path.display()));
+        }
+        names.push(format!("fs/{relative}"));
     }
-    archive.finish().map_err(display_error)
+    Ok(names)
+}
+
+fn prepare_bundle_filesystem(package: &Path) -> Result<()> {
+    let filesystem = package.join("fs");
+    copy_directory(&workspace_root().join("fs"), &filesystem)?;
+    for directory in [
+        filesystem.join("apps"),
+        filesystem.join("user").join("config"),
+        filesystem.join("user").join("saves"),
+        filesystem.join("user").join("appdata"),
+    ] {
+        fs::create_dir_all(directory).map_err(display_error)?;
+    }
+    Ok(())
 }
 
 fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     for entry in fs::read_dir(directory).map_err(display_error)? {
         let entry = entry.map_err(display_error)?;
+        if entry.file_name() == ".gitkeep" {
+            continue;
+        }
         let file_type = entry.file_type().map_err(display_error)?;
         if file_type.is_symlink() {
             return Err(format!(
-                "system image source may not contain symlinks: {}",
+                "filesystem source may not contain symlinks: {}",
                 entry.path().display()
             ));
         }
@@ -362,6 +365,9 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<()> {
     fs::create_dir_all(destination).map_err(display_error)?;
     for entry in fs::read_dir(source).map_err(display_error)? {
         let entry = entry.map_err(display_error)?;
+        if entry.file_name() == ".gitkeep" {
+            continue;
+        }
         let file_type = entry.file_type().map_err(display_error)?;
         let target = destination.join(entry.file_name());
         if file_type.is_symlink() {
@@ -391,31 +397,48 @@ fn smoke(arch: BareMetalArch) -> Result<()> {
     let log = root
         .join("target")
         .join(format!("afos-{}-smoke.log", arch.label()));
-    if log.exists() {
-        fs::remove_file(&log).map_err(display_error)?;
-    }
-    let log_file = fs::File::create(&log).map_err(display_error)?;
-    let mut command = qemu_command(arch, true)?;
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .args(["-serial"])
-        .arg(format!("file:{}", log.display()));
-    let mut child = command.spawn().map_err(display_error)?;
-    let result = wait_for_log(&mut child, &log, "AFOS:/user$ ", Duration::from_secs(45));
-    terminate(&mut child);
-    result?;
-    println!("{} Limine boot smoke test passed", arch.label());
-    drop(log_file);
+    smoke_boot(
+        arch,
+        &log,
+        "hello\n",
+        &["Hello from a portable AFOS Rhai application!"],
+    )?;
+    println!("{} Limine boot and shell-command test passed", arch.label());
     Ok(())
 }
 
-fn wait_for_log(child: &mut Child, log: &Path, needle: &str, timeout: Duration) -> Result<()> {
+fn smoke_boot(arch: BareMetalArch, log: &Path, input: &str, expected: &[&str]) -> Result<()> {
+    if log.exists() {
+        fs::remove_file(log).map_err(display_error)?;
+    }
+    let output = fs::File::create(log).map_err(display_error)?;
+    let errors = output.try_clone().map_err(display_error)?;
+    let mut command = qemu_command(arch, true)?;
+    command
+        .args(["-serial", "stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(output))
+        .stderr(Stdio::from(errors));
+    let mut child = command.spawn().map_err(display_error)?;
+    let result = (|| {
+        wait_for_log(&mut child, log, &["AFOS:/user$ "], Duration::from_secs(60))?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| String::from("QEMU stdin pipe is unavailable"))?
+            .write_all(input.as_bytes())
+            .map_err(display_error)?;
+        wait_for_log(&mut child, log, expected, Duration::from_secs(120))
+    })();
+    terminate(&mut child);
+    result
+}
+
+fn wait_for_log(child: &mut Child, log: &Path, needles: &[&str], timeout: Duration) -> Result<()> {
     let started = Instant::now();
     loop {
         if let Ok(contents) = fs::read_to_string(log)
-            && contents.contains(needle)
+            && needles.iter().all(|needle| contents.contains(needle))
         {
             return Ok(());
         }
@@ -440,13 +463,28 @@ fn terminate(child: &mut Child) {
 
 fn qemu_command(arch: BareMetalArch, headless: bool) -> Result<Command> {
     let root = workspace_root();
-    let iso = root.join("dist").join(format!("afos-{}.iso", arch.label()));
+    let iso = root.join("dist").join(arch.label()).join("afos.iso");
     let mut command = Command::new(executable(arch.qemu())?);
     match arch {
         BareMetalArch::X86_64 => {
+            let share = env::var_os("AFOS_QEMU_SHARE")
+                .map_or_else(|| PathBuf::from("/opt/homebrew/share/qemu"), PathBuf::from);
+            let code =
+                env_path("AFOS_X86_64_CODE").unwrap_or_else(|| share.join("edk2-x86_64-code.fd"));
+            let vars =
+                env_path("AFOS_X86_64_VARS").unwrap_or_else(|| share.join("edk2-i386-vars.fd"));
+            let vars_copy = root.join("target").join("afos-x86_64-vars.fd");
+            copy(&vars, &vars_copy)?;
             command
                 .args(["-machine", "q35", "-m", "256M", "-cdrom"])
-                .arg(iso);
+                .arg(iso)
+                .arg("-drive")
+                .arg(format!(
+                    "if=pflash,format=raw,readonly=on,file={}",
+                    code.display()
+                ))
+                .arg("-drive")
+                .arg(format!("if=pflash,format=raw,file={}", vars_copy.display()));
         }
         BareMetalArch::Aarch64 => {
             let share = env::var_os("AFOS_QEMU_SHARE")
@@ -506,6 +544,7 @@ fn check_all() -> Result<()> {
             "clippy",
             "-p",
             "afos-kernel",
+            "--all-features",
             "--target",
             target,
             "--",
@@ -521,6 +560,8 @@ fn check_all() -> Result<()> {
         "afos-core",
         "-p",
         "afos-runtime-rhai",
+        "-p",
+        "afos-storage",
         "--target",
         "wasm32-unknown-unknown",
     ])

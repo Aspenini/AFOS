@@ -8,13 +8,19 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+experimental-virtio = []
+
 [dependencies]
 afos-api.workspace = true
 afos-core.workspace = true
 afos-runtime-rhai.workspace = true
+afos-storage.workspace = true
 limine.workspace = true
 linked_list_allocator.workspace = true
 noto-sans-mono-bitmap.workspace = true
+virtio-drivers.workspace = true
+zerocopy.workspace = true
 
 [[bin]]
 name = "afos-kernel"

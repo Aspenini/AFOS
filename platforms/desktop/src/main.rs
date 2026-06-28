@@ -3,7 +3,7 @@ mod platform;
 use afos_api::{Error, Result};
 use afos_core::{Afos, CommandOutcome, EmbeddedFile, ShellConfig};
 use afos_runtime_rhai::RhaiRuntime;
-use platform::{DesktopPlatform, default_data_dir};
+use platform::{DesktopPlatform, bundled_filesystem_dir, default_data_dir};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -115,18 +115,13 @@ fn default_system_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("AFOS_SYSTEM_DIR") {
         return PathBuf::from(path);
     }
-    if let Ok(executable) = std::env::current_exe()
-        && let Some(parent) = executable.parent()
-    {
-        let installed = parent.join("share").join("afos").join("sys");
-        if installed.is_dir() {
-            return installed;
-        }
+    if let Some(filesystem) = bundled_filesystem_dir() {
+        return filesystem.join("sys");
     }
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
-        .join("assets")
+        .join("fs")
         .join("sys")
 }
 

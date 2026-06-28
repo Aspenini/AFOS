@@ -15,7 +15,7 @@ native host paths or boot-media paths.
 
 | Virtual path | Owner | Writable | Intended content |
 | --- | --- | --- | --- |
-| `/sys` | AFOS build | No | Files from the system image |
+| `/sys` | AFOS build | No | Files from the bundle's `fs/sys` tree |
 | `/sys/apps` | AFOS build | No | Trusted bundled scripts |
 | `/apps` | User/admin | Yes | Installed single-file apps |
 | `/user/config` | AFOS and user | Yes | System configuration |
@@ -51,17 +51,25 @@ On desktop, `/apps` and `/user` are stored beneath:
 
 1. `--data-dir`, when passed;
 2. `AFOS_DATA_DIR`, when set;
-3. the native platform application-data directory.
+3. the adjacent bundle `fs/` directory, when running a packaged build;
+4. the native platform application-data directory during development.
 
-On bare metal, `/sys` comes from the `system.tar` module that Limine loads from
-the ISO. `/apps` and `/user` currently use a RAM-backed overlay and therefore
-reset on reboot. Persistent bare-metal storage requires a future block-device
-and writable-filesystem adapter.
+On bare metal, `xtask` creates one Limine module for every file under `fs/`.
+The kernel routes `/sys` modules into the immutable system tree and copies
+initial `/apps` and `/user` modules into a RAM-backed overlay.
+
+The `afos-storage` crate now defines an architecture-neutral block-device
+contract and a checksummed, two-slot snapshot format. Packaging also creates a
+preserved 32 MiB `afos-data.img` beside each ISO. The experimental VirtIO
+adapters are not enabled in normal builds yet, so the default kernel still
+uses the RAM overlay and resets writable changes on reboot. Device mappings
+and completed reboot-persistence tests remain before that backend becomes the
+default.
 
 Desktop reads `/sys` from the directory selected by `--system-dir`,
-`AFOS_SYSTEM_DIR`, an installed `share/afos/sys` directory, or the repository's
-`assets/sys` directory during development. `cargo xtask build desktop`
-packages the binary and this external tree under `dist/desktop`.
+`AFOS_SYSTEM_DIR`, the adjacent `fs/sys` directory, or the repository's
+`fs/sys` directory during development. `cargo xtask build desktop` produces
+the complete bundle under `dist/desktop`.
 
 ## Path rules
 

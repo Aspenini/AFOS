@@ -4,6 +4,7 @@ members = [
     "crates/afos-api",
     "crates/afos-core",
     "crates/afos-runtime-rhai",
+    "crates/afos-storage",
     "platforms/desktop",
     "platforms/bare-metal",
     "xtask",
@@ -22,6 +23,7 @@ rust-version = "1.93"
 afos-api = { path = "crates/afos-api" }
 afos-core = { path = "crates/afos-core" }
 afos-runtime-rhai = { path = "crates/afos-runtime-rhai" }
+afos-storage = { path = "crates/afos-storage" }
 argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "zeroize"] }
 getrandom = "0.3.4"
 rpassword = "7.4.0"
@@ -29,7 +31,8 @@ subtle = { version = "2.6.1", default-features = false }
 limine = "0.6.5"
 linked_list_allocator = "0.10.5"
 noto-sans-mono-bitmap = { version = "0.3.2", default-features = false, features = ["regular", "size_16", "unicode-basic-latin"] }
-tar-no-std = "0.4.2"
+virtio-drivers = { version = "0.13.0", default-features = false, features = ["alloc"] }
+zerocopy = { version = "0.8.52", default-features = false }
 
 [profile.release]
 lto = true

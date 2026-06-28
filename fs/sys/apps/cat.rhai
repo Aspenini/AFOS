@@ -10,4 +10,3 @@ if values.len < 2 {
     print_raw(fs_read(values[1]));
     0
 }
-

@@ -189,6 +189,9 @@ pub fn default_data_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("AFOS_DATA_DIR") {
         return PathBuf::from(path);
     }
+    if let Some(path) = bundled_filesystem_dir() {
+        return path;
+    }
     if cfg!(target_os = "windows") {
         if let Some(path) = std::env::var_os("APPDATA") {
             return PathBuf::from(path).join("AFOS");
@@ -209,4 +212,11 @@ pub fn default_data_dir() -> PathBuf {
             .join("afos");
     }
     PathBuf::from(".afos")
+}
+
+pub fn bundled_filesystem_dir() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    let bundle = executable.parent()?.parent()?;
+    let filesystem = bundle.join("fs");
+    filesystem.join("sys").is_dir().then_some(filesystem)
 }

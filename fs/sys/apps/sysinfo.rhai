@@ -7,4 +7,3 @@ print(info["name"] + " " + info["version"]);
 print("platform: " + info["platform"]);
 print("architecture: " + info["architecture"]);
 0
-

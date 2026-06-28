@@ -1,19 +1,11 @@
 [package]
-name = "xtask"
+name = "afos-storage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-publish = false
-
-[dependencies]
-sha2 = "0.10.9"
-
-[[bin]]
-name = "xtask"
-path = "src/main.rs"
 
 [lints]
 workspace = true

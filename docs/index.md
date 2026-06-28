@@ -71,7 +71,7 @@ portable Platform contract
 
 ```text
 /
-├── sys/                  immutable files loaded from system.tar
+├── sys/                  immutable files loaded from the bundle
 │   └── apps/             trusted bundled applications
 ├── apps/                 installed applications
 └── user/

@@ -58,7 +58,7 @@ pub fn normalize_path(cwd: &str, input: &str) -> Result<String> {
 
 pub struct Vfs<P> {
     platform: P,
-    embedded: &'static [EmbeddedFile],
+    system_files: &'static [EmbeddedFile],
 }
 
 impl<P: Platform> Vfs<P> {
@@ -66,13 +66,16 @@ impl<P: Platform> Vfs<P> {
     pub fn new(platform: P) -> Self {
         Self {
             platform,
-            embedded: &[],
+            system_files: &[],
         }
     }
 
     #[must_use]
-    pub fn with_embedded(platform: P, embedded: &'static [EmbeddedFile]) -> Self {
-        Self { platform, embedded }
+    pub fn with_system_files(platform: P, system_files: &'static [EmbeddedFile]) -> Self {
+        Self {
+            platform,
+            system_files,
+        }
     }
 
     #[must_use]
@@ -103,7 +106,7 @@ impl<P: Platform> Vfs<P> {
             return Ok(true);
         }
         if is_path_prefix("/sys", &path) {
-            return Ok(self.embedded_file(&path).is_some() || self.embedded_dir_exists(&path));
+            return Ok(self.system_file(&path).is_some() || self.system_dir_exists(&path));
         }
         self.platform.storage_exists(Self::persistent_path(&path)?)
     }
@@ -112,7 +115,7 @@ impl<P: Platform> Vfs<P> {
         let path = normalize_path("/", path)?;
         if is_path_prefix("/sys", &path) {
             return self
-                .embedded_file(&path)
+                .system_file(&path)
                 .map(|file| file.data.to_vec())
                 .ok_or(Error::NotFound(path));
         }
@@ -155,7 +158,7 @@ impl<P: Platform> Vfs<P> {
             ]);
         }
         if is_path_prefix("/sys", &path) {
-            return self.list_embedded(&path);
+            return self.list_system(&path);
         }
         self.platform.storage_list(Self::persistent_path(&path)?)
     }
@@ -207,22 +210,22 @@ impl<P: Platform> Vfs<P> {
         Ok(relative)
     }
 
-    fn embedded_file(&self, path: &str) -> Option<&EmbeddedFile> {
-        self.embedded.iter().find(|file| file.path == path)
+    fn system_file(&self, path: &str) -> Option<&EmbeddedFile> {
+        self.system_files.iter().find(|file| file.path == path)
     }
 
-    fn embedded_dir_exists(&self, path: &str) -> bool {
+    fn system_dir_exists(&self, path: &str) -> bool {
         let mut prefix = String::from(path);
         if !prefix.ends_with('/') {
             prefix.push('/');
         }
-        self.embedded
+        self.system_files
             .iter()
             .any(|file| file.path.starts_with(&prefix))
     }
 
-    fn list_embedded(&self, path: &str) -> Result<Vec<StorageEntry>> {
-        if path != "/sys" && !self.embedded_dir_exists(path) {
+    fn list_system(&self, path: &str) -> Result<Vec<StorageEntry>> {
+        if path != "/sys" && !self.system_dir_exists(path) {
             return Err(Error::NotFound(String::from(path)));
         }
 
@@ -232,7 +235,7 @@ impl<P: Platform> Vfs<P> {
         }
         let mut entries: BTreeMap<String, StorageEntry> = BTreeMap::new();
 
-        for file in self.embedded {
+        for file in self.system_files {
             let Some(remainder) = file.path.strip_prefix(&prefix) else {
                 continue;
             };

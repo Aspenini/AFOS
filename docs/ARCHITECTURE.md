@@ -52,10 +52,13 @@ an app may access; the shared core makes that decision first.
 - `afos-core` owns paths, VFS routing, application discovery, shell state,
   authentication, and per-operation authorization.
 - `afos-runtime-rhai` maps `SystemApi` into a constrained Rhai engine.
+- `afos-storage` defines the low-level block-device boundary and portable,
+  checksummed snapshot persistence format.
 - `afos-desktop` implements the platform contract with standard input/output,
   native files, system entropy, and a monotonic clock.
 - `afos-kernel` is a standalone ELF kernel with framebuffer, serial, keyboard,
-  clock, allocator, and RAM-storage adapters.
+  clock, memory-map-backed allocation, RAM storage, hardware entropy, and
+  experimental VirtIO adapters.
 - `xtask` provides reproducible build, packaging, QEMU, and validation tasks.
 
 Only platform crates may depend on host or hardware APIs. Shared crates compile
@@ -89,9 +92,9 @@ background jobs, or preemptive scheduling.
 ## Virtual filesystem
 
 `/sys` is a read-only file table loaded at startup. Desktop reads it from a
-host directory. Bare metal parses it from `system.tar`, which Limine loads as
-a boot module. `/apps` and `/user` are normalized before the platform sees
-them. Paths containing NULs, backslashes, or attempts to escape the root are
+host directory. Bare metal receives each file as a separately tagged Limine
+module. `/apps` and `/user` are normalized before the platform sees them.
+Paths containing NULs, backslashes, or attempts to escape the root are
 rejected.
 
 The desktop adapter canonicalizes existing paths, canonicalizes writable
@@ -100,15 +103,14 @@ adapter stores writable files in memory.
 
 ## Boot and update boundary
 
-Limine reads the kernel ELF and system archive as ordinary files from the ISO,
-allocates memory for both, maps the ELF segments, and transfers control to the
-ELF entry point. The kernel does not contain the bootloader or bundled Rhai
-scripts.
+Limine reads the kernel ELF and individual `fs/` files from the ISO, allocates
+memory for them, maps the ELF segments, and transfers control to the ELF entry
+point. The kernel does not contain the bootloader or bundled Rhai scripts.
 
 This creates independent update units:
 
 ```text
-Limine → afos-<arch>.elf → system.tar → Rhai app
+Limine → boot/afos.elf → fs/sys/apps/*.rhai
 ```
 
 Replacing a unit and repackaging the ISO updates that layer without changing

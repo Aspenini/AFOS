@@ -106,6 +106,48 @@ pub fn counter() -> u64 {
     }
 }
 
+pub fn fill_hardware_random(output: &mut [u8]) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let features = core::arch::x86_64::__cpuid(1);
+        if features.ecx & (1 << 30) == 0 {
+            return false;
+        }
+        for chunk in output.chunks_mut(8) {
+            let mut value = 0_u64;
+            let mut ready = 0_u8;
+            for _ in 0..10 {
+                // SAFETY: CPUID reported RDRAND support. The instruction's carry
+                // flag indicates whether this attempt produced a random value.
+                unsafe {
+                    core::arch::asm!(
+                        "rdrand {value}",
+                        "setc {ready}",
+                        value = out(reg) value,
+                        ready = out(reg_byte) ready,
+                        options(nomem, nostack)
+                    );
+                }
+                if ready != 0 {
+                    break;
+                }
+                core::hint::spin_loop();
+            }
+            if ready == 0 {
+                output.fill(0);
+                return false;
+            }
+            chunk.copy_from_slice(&value.to_le_bytes()[..chunk.len()]);
+        }
+        true
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = output;
+        false
+    }
+}
+
 pub fn halt() -> ! {
     loop {
         #[cfg(target_arch = "x86_64")]

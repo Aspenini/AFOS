@@ -171,7 +171,7 @@ static TEST_SYSTEM_FILES: &[EmbeddedFile] = &[EmbeddedFile::text(
 
 #[test]
 fn vfs_routes_mounts_and_keeps_sys_read_only() {
-    let mut vfs = Vfs::with_embedded(MockPlatform::default(), TEST_SYSTEM_FILES);
+    let mut vfs = Vfs::with_system_files(MockPlatform::default(), TEST_SYSTEM_FILES);
     vfs.initialize_layout().unwrap();
     assert!(
         vfs.read_text("/sys/README.txt")

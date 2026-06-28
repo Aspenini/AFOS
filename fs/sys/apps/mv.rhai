@@ -10,4 +10,3 @@ if values.len != 3 {
     fs_rename(values[1], values[2]);
     0
 }
-

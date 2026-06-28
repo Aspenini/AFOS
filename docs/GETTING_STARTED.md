@@ -89,8 +89,8 @@ cargo xtask smoke aarch64
 just test-bare-metal
 ```
 
-The smoke tests require QEMU and xorriso; AArch64 also requires EDK2 and
-mtools. See the [bare-metal guide]({{ '/bare-metal/' | relative_url }}) for installation and
+The smoke tests require QEMU, EDK2, xorriso, and mtools. See the
+[bare-metal guide]({{ '/bare-metal/' | relative_url }}) for installation and
 configuration.
 
 ## Where to continue
