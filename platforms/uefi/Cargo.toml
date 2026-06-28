@@ -1,0 +1,22 @@
+[package]
+name = "afos-uefi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+afos-api.workspace = true
+afos-core.workspace = true
+afos-runtime-rhai.workspace = true
+uefi.workspace = true
+
+[[bin]]
+name = "afos-uefi"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+

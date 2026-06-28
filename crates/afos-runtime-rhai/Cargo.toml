@@ -1,0 +1,23 @@
+[package]
+name = "afos-runtime-rhai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+afos-api.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+rhai = { version = "=1.25.1", default-features = false, features = ["no_std", "no_float", "only_i64"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+rhai = { version = "=1.25.1", default-features = false, features = ["std", "wasm-bindgen", "no_float", "only_i64"] }
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

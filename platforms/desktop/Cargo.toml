@@ -1,0 +1,23 @@
+[package]
+name = "afos-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+afos-api.workspace = true
+afos-core.workspace = true
+afos-runtime-rhai.workspace = true
+getrandom.workspace = true
+rpassword.workspace = true
+
+[[bin]]
+name = "afos"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+

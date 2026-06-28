@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/afos-api",
+    "crates/afos-core",
+    "crates/afos-runtime-rhai",
+    "platforms/desktop",
+    "platforms/uefi",
+    "xtask",
+]
+default-members = ["platforms/desktop"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+authors = ["Aspen Feltner"]
+repository = "https://github.com/Aspenini/AFOS"
+rust-version = "1.93"
+
+[workspace.dependencies]
+afos-api = { path = "crates/afos-api" }
+afos-core = { path = "crates/afos-core" }
+afos-runtime-rhai = { path = "crates/afos-runtime-rhai" }
+argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "zeroize"] }
+getrandom = "0.3.4"
+rpassword = "7.4.0"
+subtle = { version = "2.6.1", default-features = false }
+uefi = { version = "0.38.0", features = ["alloc", "global_allocator", "logger", "panic_handler"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+needless_pass_by_value = "allow"
