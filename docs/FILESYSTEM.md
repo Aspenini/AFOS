@@ -9,13 +9,13 @@ permalink: /filesystem/
 # Filesystem and persistence
 
 AFOS exposes one virtual filesystem on every target. Applications never see
-native host paths or UEFI volume paths.
+native host paths or boot-media paths.
 
 ## Directory roles
 
 | Virtual path | Owner | Writable | Intended content |
 | --- | --- | --- | --- |
-| `/sys` | AFOS build | No | Embedded system files |
+| `/sys` | AFOS build | No | Files from the system image |
 | `/sys/apps` | AFOS build | No | Trusted bundled scripts |
 | `/apps` | User/admin | Yes | Installed single-file apps |
 | `/user/config` | AFOS and user | Yes | System configuration |
@@ -53,9 +53,15 @@ On desktop, `/apps` and `/user` are stored beneath:
 2. `AFOS_DATA_DIR`, when set;
 3. the native platform application-data directory.
 
-On UEFI, persistent files live beneath `\AFOS` on the FAT volume that loaded
-AFOS. `/sys` is embedded in the executable on every platform and never maps to
-writable storage.
+On bare metal, `/sys` comes from the `system.tar` module that Limine loads from
+the ISO. `/apps` and `/user` currently use a RAM-backed overlay and therefore
+reset on reboot. Persistent bare-metal storage requires a future block-device
+and writable-filesystem adapter.
+
+Desktop reads `/sys` from the directory selected by `--system-dir`,
+`AFOS_SYSTEM_DIR`, an installed `share/afos/sys` directory, or the repository's
+`assets/sys` directory during development. `cargo xtask build desktop`
+packages the binary and this external tree under `dist/desktop`.
 
 ## Path rules
 

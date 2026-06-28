@@ -14,7 +14,7 @@ The shared crates require `core` and `alloc`. A new target provides one
 Required services:
 
 1. Text output, line input, secret input masking, and clear-screen support.
-2. A persistent filesystem rooted specifically for AFOS.
+2. A storage implementation rooted specifically for AFOS.
 3. Monotonic milliseconds.
 4. Cryptographically secure random bytes for password salts.
 5. Platform and architecture identification.
@@ -36,7 +36,8 @@ logic in a platform crate.
 
 - Console functions preserve UTF-8 as far as the platform permits.
 - Secret input does not echo the entered password.
-- Storage is rooted beneath one AFOS-owned location.
+- Storage is rooted beneath one AFOS-owned location; nonpersistent adapters
+  document that behavior explicitly.
 - Storage paths are normalized and relative before reaching the backend.
 - Writes cannot escape through links, aliases, devices, or mount points.
 - Entropy failures are reported instead of replaced with predictable bytes.
@@ -49,7 +50,7 @@ Before declaring a port supported:
 - compile the shared crates for the target;
 - run bundled Rhai commands;
 - validate protected operations;
-- persist a file, restart the target, and read it again.
+- test persistence across restart when the backend claims persistence.
 
 Add the target to `xtask` after those checks can be automated. A supported
 port needs a reproducible package layout and a restart-persistence smoke test.

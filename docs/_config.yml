@@ -1,5 +1,5 @@
 title: AFOS
-description: A portable Rust application environment for desktop and UEFI
+description: A portable Rust application environment for desktop and bare metal
 url: https://aspenini.github.io
 baseurl: /AFOS
 repository: Aspenini/AFOS
@@ -15,4 +15,3 @@ defaults:
 
 exclude:
   - _site
-

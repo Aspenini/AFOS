@@ -9,7 +9,7 @@ permalink: /
 # AFOS
 
 AFOS is a terminal-first application environment whose system logic is shared
-across native desktop and UEFI targets. The shell, virtual filesystem,
+across native desktop and bare-metal targets. The shell, virtual filesystem,
 permissions, application discovery, authentication, and Rhai execution all
 live in a portable `no_std + alloc` Rust core. Platforms provide only the
 services that cannot be universal: console I/O, persistent storage, time,
@@ -19,7 +19,7 @@ entropy, and platform information.
 
 ### Run AFOS
 
-Start the native terminal build, execute one command, or boot an EFI image.
+Start the native terminal build, execute one command, or boot a Limine ISO.
 
 [Get started →]({{ '/getting-started/' | relative_url }})
 
@@ -42,11 +42,11 @@ implement.
 | Target | Status | What changes |
 | --- | --- | --- |
 | macOS, Linux, Windows | Supported | Native terminal and host-backed storage |
-| x86_64 UEFI | Supported and QEMU-tested | UEFI console and filesystem protocols |
-| AArch64 UEFI | Supported and QEMU-tested | Same UEFI backend, different Rust target |
+| x86_64 bare metal | Supported and QEMU-tested | Limine, framebuffer, serial, PS/2 |
+| AArch64 bare metal | Supported and QEMU-tested | Limine, framebuffer, PL011 |
 | Browser WASM | Shared crates compile | Browser backend and UI are deferred |
 
-Desktop and UEFI run the same AFOS core and official Rhai interpreter. No
+Desktop and bare metal run the same AFOS core and official Rhai interpreter. No
 custom Rhai implementation is maintained in this repository.
 
 ## System at a glance
@@ -64,14 +64,14 @@ shell · VFS · authentication · runtime registry
 portable Platform contract
         │
         ├── desktop backend
-        └── UEFI backend (x86_64 / AArch64)
+        └── bare-metal backend (x86_64 / AArch64)
 ```
 
 ## Files at a glance
 
 ```text
 /
-├── sys/                  immutable files embedded into AFOS
+├── sys/                  immutable files loaded from system.tar
 │   └── apps/             trusted bundled applications
 ├── apps/                 installed applications
 └── user/
@@ -88,7 +88,6 @@ capability.
 
 - [Install prerequisites and run AFOS]({{ '/getting-started/' | relative_url }})
 - [Learn the virtual filesystem]({{ '/filesystem/' | relative_url }})
-- [Build and boot the UEFI targets]({{ '/uefi/' | relative_url }})
+- [Build and boot bare metal]({{ '/bare-metal/' | relative_url }})
 - [Review the security boundaries]({{ '/security/' | relative_url }})
 - [Implement another platform backend]({{ '/porting/' | relative_url }})
-

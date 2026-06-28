@@ -1,6 +1,6 @@
 ---
 title: Getting started
-description: Install the AFOS toolchain and run desktop or UEFI builds.
+description: Install the AFOS toolchain and run desktop or Limine bare-metal builds.
 permalink: /getting-started/
 ---
 
@@ -26,6 +26,8 @@ cd AFOS
 
 ```sh
 cargo run
+# or
+just desktop
 ```
 
 AFOS performs first-run setup, creates its persistent directory tree, and
@@ -50,6 +52,7 @@ Execute a command without opening an interactive shell:
 
 ```sh
 cargo run -- --command "ls /sys/apps"
+just desktop-command "ls /sys/apps"
 ```
 
 Use disposable storage for examples and tests:
@@ -74,18 +77,20 @@ location.
 cargo xtask check
 ```
 
-This runs formatting checks, unit and integration tests, Clippy, both UEFI
+This runs formatting checks, unit and integration tests, Clippy, both kernel
 cross-compiles, and the shared-crate WASM compile check.
 
-For actual firmware boot tests:
+For actual Limine boot tests:
 
 ```sh
 cargo xtask smoke x86_64
 cargo xtask smoke aarch64
+# or both:
+just test-bare-metal
 ```
 
-The smoke tests require QEMU, EDK2 firmware, and mtools. See the
-[UEFI guide]({{ '/uefi/' | relative_url }}) for installation and
+The smoke tests require QEMU and xorriso; AArch64 also requires EDK2 and
+mtools. See the [bare-metal guide]({{ '/bare-metal/' | relative_url }}) for installation and
 configuration.
 
 ## Where to continue

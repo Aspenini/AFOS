@@ -1,7 +1,9 @@
 use afos_api::{BoxedRuntime, Error, Platform, Result, SystemApi};
 use alloc::{string::String, vec::Vec};
 
-use crate::{AppSession, RuntimeRegistry, System, normalize_path, parse_metadata};
+use crate::{
+    AppSession, EmbeddedFile, RuntimeRegistry, System, Vfs, normalize_path, parse_metadata,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommandOutcome {
@@ -35,6 +37,15 @@ impl<P: Platform> Afos<P> {
     pub fn new(platform: P) -> Self {
         Self {
             system: System::new(platform),
+            runtimes: RuntimeRegistry::new(),
+            cwd: String::from("/user"),
+        }
+    }
+
+    #[must_use]
+    pub fn with_system_files(platform: P, files: &'static [EmbeddedFile]) -> Self {
+        Self {
+            system: System::with_vfs(Vfs::with_embedded(platform, files)),
             runtimes: RuntimeRegistry::new(),
             cwd: String::from("/user"),
         }

@@ -14,8 +14,8 @@ malicious firmware, or replacement of the AFOS executable.
 
 ## Trust boundaries
 
-- `/sys` and `/sys/apps` are embedded into AFOS and cannot be written through
-  the VFS.
+- `/sys` and `/sys/apps` are loaded from the read-only system image and cannot
+  be written through the VFS.
 - Bundled system applications are trusted and automatically receive the
   capabilities declared in their source.
 - Installed `/apps` applications receive only console, arguments, current
@@ -51,11 +51,12 @@ Three failed attempts activate an increasing delay, capped at 32 seconds.
 `passwd` changes or disables the password. Changing an existing password
 requires the current one.
 
-UEFI firmware must expose the RNG protocol to configure a password. AFOS
-returns an error rather than silently generating a weak salt when it does not.
+The current bare-metal backend has no hardware entropy driver, so password
+creation is disabled there. AFOS returns an error rather than silently
+generating a weak salt. Desktop uses the host operating system's entropy.
 
 The password controls AFOS API access. It does not encrypt `/user`, hide
-filenames, or make a removable FAT volume confidential.
+filenames, or encrypt underlying storage.
 
 ## Limitations
 

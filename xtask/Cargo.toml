@@ -9,6 +9,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+sha2 = "0.10.9"
+tar = "0.4.44"
 
 [[bin]]
 name = "xtask"
@@ -16,4 +18,3 @@ path = "src/main.rs"
 
 [lints]
 workspace = true
-

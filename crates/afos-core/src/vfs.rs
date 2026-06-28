@@ -1,8 +1,6 @@
 use afos_api::{Error, Platform, Result, StorageEntry};
 use alloc::{collections::BTreeMap, string::String, vec, vec::Vec};
 
-use crate::assets::SYSTEM_FILES;
-
 #[derive(Clone, Copy, Debug)]
 pub struct EmbeddedFile {
     pub path: &'static str,
@@ -68,7 +66,7 @@ impl<P: Platform> Vfs<P> {
     pub fn new(platform: P) -> Self {
         Self {
             platform,
-            embedded: SYSTEM_FILES,
+            embedded: &[],
         }
     }
 

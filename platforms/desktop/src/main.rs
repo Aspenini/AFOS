@@ -1,14 +1,18 @@
 mod platform;
 
 use afos_api::{Error, Result};
-use afos_core::{Afos, CommandOutcome, ShellConfig};
+use afos_core::{Afos, CommandOutcome, EmbeddedFile, ShellConfig};
 use afos_runtime_rhai::RhaiRuntime;
 use platform::{DesktopPlatform, default_data_dir};
-use std::path::PathBuf;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Default)]
 struct Cli {
     data_dir: Option<PathBuf>,
+    system_dir: Option<PathBuf>,
     ephemeral: bool,
     command: Option<String>,
 }
@@ -40,8 +44,9 @@ fn run() -> Result<i32> {
         (cli.data_dir.unwrap_or_else(default_data_dir), false)
     };
 
+    let system_files = load_system_files(&cli.system_dir.unwrap_or_else(default_system_dir))?;
     let platform = DesktopPlatform::new(root, remove_on_drop)?;
-    let mut afos = Afos::new(platform);
+    let mut afos = Afos::with_system_files(platform, system_files);
     afos.register_runtime(Box::new(RhaiRuntime::new()))?;
 
     if let Some(command) = cli.command {
@@ -64,6 +69,11 @@ fn parse_args() -> Result<Option<Cli>> {
                     Error::InvalidInput(String::from("--data-dir requires a path"))
                 })?));
             }
+            "--system-dir" => {
+                cli.system_dir = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    Error::InvalidInput(String::from("--system-dir requires a path"))
+                })?));
+            }
             "--ephemeral" => cli.ephemeral = true,
             "--command" | "-c" => {
                 cli.command = Some(args.next().ok_or_else(|| {
@@ -80,6 +90,7 @@ fn parse_args() -> Result<Option<Cli>> {
                      Usage: afos [OPTIONS]\n\n\
                      Options:\n\
                        --data-dir PATH    persistent data directory\n\
+                       --system-dir PATH  read-only AFOS system files\n\
                        --ephemeral        use temporary storage\n\
                        -c, --command CMD  execute one command and exit\n\
                        -V, --version      print version\n\
@@ -98,4 +109,84 @@ fn parse_args() -> Result<Option<Cli>> {
         )));
     }
     Ok(Some(cli))
+}
+
+fn default_system_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os("AFOS_SYSTEM_DIR") {
+        return PathBuf::from(path);
+    }
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        let installed = parent.join("share").join("afos").join("sys");
+        if installed.is_dir() {
+            return installed;
+        }
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("assets")
+        .join("sys")
+}
+
+fn load_system_files(root: &Path) -> Result<&'static [EmbeddedFile]> {
+    let root = root.canonicalize().map_err(|error| {
+        Error::Io(format!(
+            "cannot open system directory {}: {error}",
+            root.display()
+        ))
+    })?;
+    let mut paths = Vec::new();
+    collect_files(&root, &root, &mut paths)?;
+    paths.sort();
+
+    let mut files = Vec::with_capacity(paths.len());
+    for path in paths {
+        let relative = path
+            .strip_prefix(&root)
+            .map_err(|_| Error::InvalidPath)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let virtual_path = format!("/sys/{relative}");
+        files.push(EmbeddedFile {
+            path: Box::leak(virtual_path.into_boxed_str()),
+            data: Box::leak(fs::read(&path).map_err(io_error)?.into_boxed_slice()),
+        });
+    }
+    if files.is_empty() {
+        return Err(Error::InvalidInput(String::from(
+            "system directory contains no files",
+        )));
+    }
+    Ok(Box::leak(files.into_boxed_slice()))
+}
+
+fn collect_files(root: &Path, directory: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(directory).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let file_type = entry.file_type().map_err(io_error)?;
+        if file_type.is_symlink() {
+            return Err(Error::PermissionDenied(format!(
+                "system file may not be a symbolic link: {}",
+                entry.path().display()
+            )));
+        }
+        if file_type.is_dir() {
+            collect_files(root, &entry.path(), output)?;
+        } else if file_type.is_file() {
+            let canonical = entry.path().canonicalize().map_err(io_error)?;
+            if !canonical.starts_with(root) {
+                return Err(Error::PermissionDenied(String::from(
+                    "system file escapes its root",
+                )));
+            }
+            output.push(canonical);
+        }
+    }
+    Ok(())
+}
+
+fn io_error(error: std::io::Error) -> Error {
+    Error::Io(error.to_string())
 }

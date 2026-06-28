@@ -3,13 +3,14 @@
 extern crate alloc;
 
 mod app;
-mod assets;
+mod image;
 mod security;
 mod shell;
 mod system;
 mod vfs;
 
 pub use app::{AppMetadata, RuntimeRegistry, parse_metadata};
+pub use image::load_system_image;
 pub use security::SecurityManager;
 pub use shell::{Afos, CommandOutcome, ShellConfig, split_command_line};
 pub use system::{AppSession, System};

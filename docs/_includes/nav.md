@@ -4,9 +4,8 @@
 [Filesystem]({{ '/filesystem/' | relative_url }}) ·
 [Architecture]({{ '/architecture/' | relative_url }}) ·
 [Security]({{ '/security/' | relative_url }}) ·
-[UEFI]({{ '/uefi/' | relative_url }}) ·
+[Bare metal]({{ '/bare-metal/' | relative_url }}) ·
 [Porting]({{ '/porting/' | relative_url }}) ·
 [GitHub](https://github.com/Aspenini/AFOS)
 
 ---
-

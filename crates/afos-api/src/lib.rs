@@ -74,7 +74,7 @@ pub trait Platform {
     fn console_read_line(&mut self, prompt: &str, secret: bool) -> Result<String>;
     fn console_clear(&mut self) -> Result<()>;
 
-    /// Storage paths are normalized, relative paths rooted at AFOS persistent storage.
+    /// Storage paths are normalized and relative to the platform's AFOS-owned root.
     fn storage_read(&mut self, path: &str) -> Result<Vec<u8>>;
     fn storage_write(&mut self, path: &str, data: &[u8]) -> Result<()>;
     fn storage_list(&mut self, path: &str) -> Result<Vec<StorageEntry>>;

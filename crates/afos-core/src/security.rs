@@ -94,7 +94,7 @@ impl SecurityManager {
 }
 
 fn derive(password: &[u8], salt: &[u8; SALT_LEN]) -> Result<[u8; HASH_LEN]> {
-    // A single lane keeps behavior deterministic on UEFI's single execution thread.
+    // A single lane keeps behavior deterministic on every single-threaded backend.
     let params = Params::new(19 * 1024, 2, 1, Some(HASH_LEN))
         .map_err(|error| Error::Runtime(alloc::format!("Argon2 parameters: {error}")))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
