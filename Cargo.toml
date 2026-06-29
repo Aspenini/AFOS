@@ -31,6 +31,7 @@ subtle = { version = "2.6.1", default-features = false }
 limine = "0.6.5"
 linked_list_allocator = "0.10.5"
 noto-sans-mono-bitmap = { version = "0.3.2", default-features = false, features = ["regular", "size_16", "unicode-basic-latin"] }
+smoltcp = { version = "0.13.1", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "proto-dhcpv4", "proto-dns", "socket-tcp", "socket-dhcpv4", "socket-dns"] }
 virtio-drivers = { version = "0.13.0", default-features = false, features = ["alloc"] }
 zerocopy = { version = "0.8.52", default-features = false }
 

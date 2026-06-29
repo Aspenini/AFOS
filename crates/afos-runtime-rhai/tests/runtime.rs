@@ -1,5 +1,18 @@
-use afos_api::{AppIdentity, AppRuntime, Error, Result, StorageEntry, SystemApi, SystemInfo};
+use afos_api::{
+    AppIdentity, AppRuntime, Error, NetStatus, Result, StorageEntry, SystemApi, SystemInfo,
+};
 use afos_runtime_rhai::RhaiRuntime;
+use std::sync::{Mutex, MutexGuard};
+
+/// The Rhai runtime installs the active API into a single global slot and
+/// rejects nested execution, so tests that evaluate scripts must not overlap.
+static RUNTIME_LOCK: Mutex<()> = Mutex::new(());
+
+fn serialized() -> MutexGuard<'static, ()> {
+    RUNTIME_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 struct FakeApi {
     app: AppIdentity,
@@ -7,6 +20,8 @@ struct FakeApi {
     output: String,
     file: String,
     cancelled: bool,
+    net_sent: Vec<u8>,
+    net_response: Vec<u8>,
 }
 
 impl FakeApi {
@@ -23,6 +38,8 @@ impl FakeApi {
             output: String::new(),
             file: String::new(),
             cancelled: false,
+            net_sent: Vec::new(),
+            net_response: Vec::new(),
         }
     }
 }
@@ -82,6 +99,28 @@ impl SystemApi for FakeApi {
             architecture: String::from("fake"),
         })
     }
+    fn net_status(&mut self) -> Result<NetStatus> {
+        Ok(NetStatus {
+            link_up: true,
+            mac: String::from("52:54:00:12:34:56"),
+            address: Some(String::from("10.0.0.2/24")),
+            gateway: Some(String::from("10.0.0.1")),
+        })
+    }
+    fn net_connect(&mut self, _host: &str, _port: u16) -> Result<u64> {
+        Ok(1)
+    }
+    fn net_send(&mut self, _handle: u64, data: &[u8]) -> Result<usize> {
+        self.net_sent.extend_from_slice(data);
+        Ok(data.len())
+    }
+    fn net_recv(&mut self, _handle: u64, max: usize) -> Result<Vec<u8>> {
+        let count = max.min(self.net_response.len());
+        Ok(self.net_response.drain(..count).collect())
+    }
+    fn net_close(&mut self, _handle: u64) -> Result<()> {
+        Ok(())
+    }
     fn cancelled(&mut self) -> bool {
         self.cancelled
     }
@@ -89,6 +128,7 @@ impl SystemApi for FakeApi {
 
 #[test]
 fn executes_scripts_and_maps_host_errors() {
+    let _guard = serialized();
     let runtime = RhaiRuntime::new();
     let mut api = FakeApi::new();
     let status = runtime
@@ -111,4 +151,29 @@ fn executes_scripts_and_maps_host_errors() {
         runtime.execute("loop { }", &mut api),
         Err(Error::Runtime(_))
     ));
+}
+
+#[test]
+fn exposes_networking_to_scripts() {
+    let _guard = serialized();
+    let runtime = RhaiRuntime::new();
+    let mut api = FakeApi::new();
+    api.net_response = b"HTTP/1.1 200 OK".to_vec();
+    let status = runtime
+        .execute(
+            r#"
+                let info = net_status();
+                print(info.address);
+                let socket = net_connect("example.com", 80);
+                net_send(socket, "GET / HTTP/1.1\r\n");
+                let reply = net_recv(socket, 64);
+                net_close(socket);
+                if reply.contains("200 OK") { 0 } else { 1 }
+            "#,
+            &mut api,
+        )
+        .unwrap();
+    assert_eq!(status, 0);
+    assert_eq!(api.output, "10.0.0.2/24\n");
+    assert_eq!(api.net_sent, b"GET / HTTP/1.1\r\n");
 }

@@ -475,6 +475,7 @@ fn qemu_command(arch: BareMetalArch, headless: bool) -> Result<Command> {
                 env_path("AFOS_X86_64_VARS").unwrap_or_else(|| share.join("edk2-i386-vars.fd"));
             let vars_copy = root.join("target").join("afos-x86_64-vars.fd");
             copy(&vars, &vars_copy)?;
+            let data_disk = root.join("dist").join("x86_64").join("afos-data.img");
             command
                 .args(["-machine", "q35", "-m", "256M", "-cdrom"])
                 .arg(iso)
@@ -484,7 +485,24 @@ fn qemu_command(arch: BareMetalArch, headless: bool) -> Result<Command> {
                     code.display()
                 ))
                 .arg("-drive")
-                .arg(format!("if=pflash,format=raw,file={}", vars_copy.display()));
+                .arg(format!("if=pflash,format=raw,file={}", vars_copy.display()))
+                // AFOS persistent data and NIC. The kernel speaks the transitional
+                // (legacy I/O BAR) VirtIO interface, so force that on q35. Legacy
+                // virtqueues are fixed-size, so the device ring must match the
+                // kernel's 16-entry layout (see VIRTIO_QUEUE_SIZE).
+                .arg("-drive")
+                .arg(format!(
+                    "if=none,id=afos-data,format=raw,file={}",
+                    data_disk.display()
+                ))
+                .args([
+                    "-device",
+                    "virtio-blk-pci,drive=afos-data,disable-modern=on,disable-legacy=off,queue-size=16",
+                    "-netdev",
+                    "user,id=afos-net",
+                    "-device",
+                    "virtio-net-pci,netdev=afos-net,disable-modern=on,disable-legacy=off",
+                ]);
         }
         BareMetalArch::Aarch64 => {
             let share = env::var_os("AFOS_QEMU_SHARE")
@@ -495,6 +513,7 @@ fn qemu_command(arch: BareMetalArch, headless: bool) -> Result<Command> {
                 env_path("AFOS_AARCH64_VARS").unwrap_or_else(|| share.join("edk2-arm-vars.fd"));
             let vars_copy = root.join("target").join("afos-aarch64-vars.fd");
             copy(&vars, &vars_copy)?;
+            let data_disk = root.join("dist").join("aarch64").join("afos-data.img");
             command
                 .args(["-machine", "virt", "-cpu", "cortex-a72", "-m", "512M"])
                 .args(["-device", "ramfb"])
@@ -515,6 +534,21 @@ fn qemu_command(arch: BareMetalArch, headless: bool) -> Result<Command> {
                     "virtio-scsi-pci",
                     "-device",
                     "scsi-cd,drive=cdrom",
+                ])
+                // AFOS persistent data and NIC on the virt machine's VirtIO-MMIO
+                // transports, which the kernel scans at 0x0a000000.
+                .arg("-drive")
+                .arg(format!(
+                    "if=none,id=afos-data,format=raw,file={}",
+                    data_disk.display()
+                ))
+                .args([
+                    "-device",
+                    "virtio-blk-device,drive=afos-data,queue-size=16",
+                    "-netdev",
+                    "user,id=afos-net",
+                    "-device",
+                    "virtio-net-device,netdev=afos-net",
                 ]);
         }
     }

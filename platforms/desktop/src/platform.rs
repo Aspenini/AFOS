@@ -1,7 +1,9 @@
-use afos_api::{Error, Platform, Result, StorageEntry, SystemInfo};
+use afos_api::{Error, NetStatus, Platform, Result, StorageEntry, SystemInfo};
 use std::{
+    collections::HashMap,
     fs,
-    io::{self, Write},
+    io::{self, Read, Write},
+    net::TcpStream,
     path::{Component, Path, PathBuf},
     time::Instant,
 };
@@ -10,6 +12,8 @@ pub struct DesktopPlatform {
     root: PathBuf,
     started: Instant,
     remove_on_drop: bool,
+    sockets: HashMap<u64, TcpStream>,
+    next_handle: u64,
 }
 
 impl DesktopPlatform {
@@ -20,6 +24,8 @@ impl DesktopPlatform {
             root,
             started: Instant::now(),
             remove_on_drop,
+            sockets: HashMap::new(),
+            next_handle: 1,
         })
     }
 
@@ -173,6 +179,44 @@ impl Platform for DesktopPlatform {
             platform: String::from(std::env::consts::OS),
             architecture: String::from(std::env::consts::ARCH),
         }
+    }
+
+    fn net_status(&mut self) -> Result<NetStatus> {
+        Ok(NetStatus {
+            link_up: true,
+            mac: String::from("host"),
+            address: None,
+            gateway: None,
+        })
+    }
+
+    fn net_connect(&mut self, host: &str, port: u16) -> Result<u64> {
+        let stream = TcpStream::connect((host, port)).map_err(io_error)?;
+        let handle = self.next_handle;
+        self.next_handle += 1;
+        self.sockets.insert(handle, stream);
+        Ok(handle)
+    }
+
+    fn net_send(&mut self, handle: u64, data: &[u8]) -> Result<usize> {
+        let stream = self
+            .sockets
+            .get_mut(&handle)
+            .ok_or_else(|| Error::NotFound(format!("network connection {handle}")))?;
+        stream.write(data).map_err(io_error)
+    }
+
+    fn net_recv(&mut self, handle: u64, out: &mut [u8]) -> Result<usize> {
+        let stream = self
+            .sockets
+            .get_mut(&handle)
+            .ok_or_else(|| Error::NotFound(format!("network connection {handle}")))?;
+        stream.read(out).map_err(io_error)
+    }
+
+    fn net_close(&mut self, handle: u64) -> Result<()> {
+        self.sockets.remove(&handle);
+        Ok(())
     }
 }
 

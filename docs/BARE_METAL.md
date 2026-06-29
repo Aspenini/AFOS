@@ -50,8 +50,9 @@ architecture-specific firmware loader inside the ISO; that is an internal
 bootloader detail rather than the AFOS kernel format.
 
 `afos-data.img` is a separate sparse writable-data image. Repackaging preserves
-an existing image. The default kernel does not mount it yet; it is the stable
-artifact boundary for the in-progress block-storage backend.
+an existing image. On x86_64 the kernel mounts it as a VirtIO block device and
+persists `/apps` and `/user` across reboots through the `afos-storage` snapshot
+store.
 
 ## Host requirements
 
@@ -117,23 +118,39 @@ console, and verifies the bundled Rhai application output.
 ## Filesystem behavior
 
 Files tagged `/sys/...` become the read-only system tree. Initial `/apps` and
-`/user` files are copied into an in-memory writable filesystem. Changes
-survive for the current boot but are not persistent in the default build.
+`/user` files seed the writable filesystem on first boot.
 
-The shared `afos-storage` crate now provides a 512-byte block-device trait and
-an atomic two-slot snapshot store with generation selection and checksums.
-Experimental VirtIO block and RNG drivers compile for both kernel targets
-behind the `experimental-virtio` feature. They remain disabled because x86_64
-legacy queue completion and AArch64 device-MMIO page mappings still need to be
-finished and covered by reboot tests.
+The shared `afos-storage` crate provides a 512-byte block-device trait and an
+atomic two-slot snapshot store with generation selection and checksums. On
+x86_64 the kernel drives a VirtIO block device through a transitional (legacy
+I/O BAR) PCI transport and persists every write to `afos-data.img`. Because
+legacy virtqueues are fixed-size, the QEMU device is configured with
+`queue-size=16` to match the driver's ring.
 
-The kernel heap is no longer a fixed static array. It selects an aligned usable
-region from Limine's memory map and currently caps the selected heap at 128
-MiB.
+AArch64 discovery is gated off: it still needs the VirtIO-MMIO window mapped as
+device memory plus DMA cache maintenance, so that target boots with an
+in-memory filesystem instead. A VirtIO RNG device, when present, supplies
+hardware entropy.
+
+The kernel heap selects an aligned usable region from Limine's memory map and
+caps the selected heap at 128 MiB. The kernel zeroes its own `.bss` and
+requests a 1 MiB Limine stack so the TCP/IP stack has room to run.
 
 Desktop mounts its adjacent `fs/` tree directly, so the same paths persist
-there. Adding persistent bare-metal storage is a platform-backend task and
-does not require changing shell, VFS, authorization, or runtime logic.
+there.
+
+## Networking
+
+On x86_64 the kernel discovers a VirtIO network device and drives a
+[smoltcp](https://github.com/smoltcp-rs/smoltcp) TCP/IP stack cooperatively from
+the single execution thread. DHCPv4 acquires an address lease, a DNS socket
+resolves host names, and applications open TCP client connections through the
+`net:<host>` capability and the `net_*` System API.
+
+QEMU's user-mode networking (`-netdev user`) provides DHCP, DNS, and outbound
+NAT, so `netinfo` reports the leased address and `fetch <host>` performs a real
+HTTP request. Networking shares the AArch64 gating above and is unavailable on
+that target until VirtIO-MMIO is enabled.
 
 ## Updating an image
 

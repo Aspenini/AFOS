@@ -69,6 +69,16 @@ pub struct StorageEntry {
     pub len: u64,
 }
 
+/// A snapshot of the platform's network interface.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NetStatus {
+    pub link_up: bool,
+    pub mac: String,
+    /// Local address in `address/prefix` form, when one has been assigned.
+    pub address: Option<String>,
+    pub gateway: Option<String>,
+}
+
 pub trait Platform {
     fn console_write(&mut self, text: &str) -> Result<()>;
     fn console_read_line(&mut self, prompt: &str, secret: bool) -> Result<String>;
@@ -89,6 +99,38 @@ pub trait Platform {
     fn poll_cancel(&mut self) -> bool {
         false
     }
+
+    /// Reports the network interface state. Backends without networking keep the
+    /// default and report it as unavailable.
+    fn net_status(&mut self) -> Result<NetStatus> {
+        Err(net_unavailable())
+    }
+
+    /// Opens a TCP connection to `host` (an IPv4 literal or resolvable name) on
+    /// `port`, returning an opaque connection handle.
+    fn net_connect(&mut self, _host: &str, _port: u16) -> Result<u64> {
+        Err(net_unavailable())
+    }
+
+    /// Writes bytes to an open connection, returning the number accepted.
+    fn net_send(&mut self, _handle: u64, _data: &[u8]) -> Result<usize> {
+        Err(net_unavailable())
+    }
+
+    /// Reads up to `out.len()` bytes from an open connection. A return of `0`
+    /// means the peer has closed the connection.
+    fn net_recv(&mut self, _handle: u64, _out: &mut [u8]) -> Result<usize> {
+        Err(net_unavailable())
+    }
+
+    /// Closes an open connection. Closing an unknown handle is not an error.
+    fn net_close(&mut self, _handle: u64) -> Result<()> {
+        Err(net_unavailable())
+    }
+}
+
+fn net_unavailable() -> Error {
+    Error::Unsupported(String::from("networking is unavailable on this platform"))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -97,6 +139,8 @@ pub enum Capability {
     FsWrite(String),
     Clock,
     SystemInfo,
+    /// Outbound network access to a host pattern (`*` matches any host).
+    Network(String),
 }
 
 impl fmt::Display for Capability {
@@ -106,6 +150,7 @@ impl fmt::Display for Capability {
             Self::FsWrite(path) => write!(f, "fs.write:{path}"),
             Self::Clock => f.write_str("clock"),
             Self::SystemInfo => f.write_str("system.info"),
+            Self::Network(host) => write!(f, "net:{host}"),
         }
     }
 }
@@ -135,6 +180,11 @@ pub trait SystemApi {
     fn appdata_write(&mut self, path: &str, text: &str) -> Result<()>;
     fn monotonic_millis(&mut self) -> Result<u64>;
     fn system_info(&mut self) -> Result<SystemInfo>;
+    fn net_status(&mut self) -> Result<NetStatus>;
+    fn net_connect(&mut self, host: &str, port: u16) -> Result<u64>;
+    fn net_send(&mut self, handle: u64, data: &[u8]) -> Result<usize>;
+    fn net_recv(&mut self, handle: u64, max: usize) -> Result<Vec<u8>>;
+    fn net_close(&mut self, handle: u64) -> Result<()>;
     fn cancelled(&mut self) -> bool;
 }
 

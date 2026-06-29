@@ -76,6 +76,20 @@ fn rhai_error(error: Error) -> Box<EvalAltResult> {
     EvalAltResult::ErrorRuntime(error.to_string().into(), Position::NONE).into()
 }
 
+fn optional_string(value: Option<String>) -> Dynamic {
+    value.map_or(Dynamic::UNIT, Dynamic::from)
+}
+
+fn net_handle_to_int(handle: u64) -> Result<INT> {
+    INT::try_from(handle)
+        .map_err(|_| Error::ResourceLimit(String::from("connection handle exceeds Rhai integer")))
+}
+
+fn net_handle_from_int(handle: INT) -> Result<u64> {
+    u64::try_from(handle)
+        .map_err(|_| Error::InvalidInput(String::from("invalid connection handle")))
+}
+
 #[derive(Default)]
 pub struct RhaiRuntime;
 
@@ -212,6 +226,62 @@ impl RhaiRuntime {
                 })
             })
             .map_err(rhai_error)
+        });
+
+        engine.register_fn("net_status", || -> RhaiResult<Map> {
+            with_api(|api| {
+                api.net_status().map(|status| {
+                    let mut map = Map::new();
+                    map.insert("link_up".into(), status.link_up.into());
+                    map.insert("mac".into(), status.mac.into());
+                    map.insert("address".into(), optional_string(status.address));
+                    map.insert("gateway".into(), optional_string(status.gateway));
+                    map
+                })
+            })
+            .map_err(rhai_error)
+        });
+        engine.register_fn(
+            "net_connect",
+            |host: ImmutableString, port: INT| -> RhaiResult<INT> {
+                let port = u16::try_from(port).map_err(|_| {
+                    rhai_error(Error::InvalidInput(String::from("port is out of range")))
+                })?;
+                with_api(|api| api.net_connect(host.as_str(), port))
+                    .and_then(net_handle_to_int)
+                    .map_err(rhai_error)
+            },
+        );
+        engine.register_fn(
+            "net_send",
+            |handle: INT, text: ImmutableString| -> RhaiResult<INT> {
+                let handle = net_handle_from_int(handle).map_err(rhai_error)?;
+                with_api(|api| api.net_send(handle, text.as_bytes()))
+                    .and_then(|count| {
+                        i64::try_from(count).map_err(|_| {
+                            Error::ResourceLimit(String::from("byte count exceeds Rhai integer"))
+                        })
+                    })
+                    .map_err(rhai_error)
+            },
+        );
+        engine.register_fn(
+            "net_recv",
+            |handle: INT, max: INT| -> RhaiResult<ImmutableString> {
+                let handle = net_handle_from_int(handle).map_err(rhai_error)?;
+                let max = usize::try_from(max).map_err(|_| {
+                    rhai_error(Error::InvalidInput(String::from("invalid receive length")))
+                })?;
+                with_api(|api| api.net_recv(handle, max))
+                    .map(|bytes| {
+                        ImmutableString::from(String::from_utf8_lossy(&bytes).into_owned())
+                    })
+                    .map_err(rhai_error)
+            },
+        );
+        engine.register_fn("net_close", |handle: INT| -> RhaiResult<()> {
+            let handle = net_handle_from_int(handle).map_err(rhai_error)?;
+            with_api(|api| api.net_close(handle)).map_err(rhai_error)
         });
 
         engine

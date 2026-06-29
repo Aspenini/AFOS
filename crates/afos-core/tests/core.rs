@@ -1,5 +1,6 @@
 use afos_api::{
-    AppIdentity, Capability, Error, Platform, Result, StorageEntry, SystemApi, SystemInfo,
+    AppIdentity, Capability, Error, NetStatus, Platform, Result, StorageEntry, SystemApi,
+    SystemInfo,
 };
 use afos_core::{AppSession, EmbeddedFile, SecurityManager, System, Vfs};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -11,6 +12,7 @@ struct MockPlatform {
     input: VecDeque<String>,
     output: String,
     now: u64,
+    connected: Vec<String>,
 }
 
 impl MockPlatform {
@@ -148,6 +150,32 @@ impl Platform for MockPlatform {
             architecture: String::from("test"),
         }
     }
+
+    fn net_status(&mut self) -> Result<NetStatus> {
+        Ok(NetStatus {
+            link_up: true,
+            mac: String::from("mock"),
+            address: Some(String::from("198.51.100.2/24")),
+            gateway: Some(String::from("198.51.100.1")),
+        })
+    }
+
+    fn net_connect(&mut self, host: &str, port: u16) -> Result<u64> {
+        self.connected.push(format!("{host}:{port}"));
+        Ok(self.connected.len() as u64)
+    }
+
+    fn net_send(&mut self, _handle: u64, data: &[u8]) -> Result<usize> {
+        Ok(data.len())
+    }
+
+    fn net_recv(&mut self, _handle: u64, _out: &mut [u8]) -> Result<usize> {
+        Ok(0)
+    }
+
+    fn net_close(&mut self, _handle: u64) -> Result<()> {
+        Ok(())
+    }
 }
 
 fn identity(trusted: bool, capabilities: Vec<Capability>) -> AppIdentity {
@@ -275,6 +303,64 @@ fn appdata_is_private_and_security_config_is_never_exposed() {
             Err(Error::PermissionDenied(_))
         ));
     }
+}
+
+#[test]
+fn network_access_honors_declared_host_capabilities() {
+    let mut system = System::new(MockPlatform::default());
+    system.initialize(false).unwrap();
+
+    {
+        // A trusted app with a wildcard capability connects without prompting.
+        let mut session = AppSession::new(
+            &mut system,
+            identity(true, vec![Capability::Network(String::from("*"))]),
+            Vec::new(),
+            String::from("/"),
+        );
+        let handle = session.net_connect("example.com", 80).unwrap();
+        assert_eq!(session.net_send(handle, b"ping").unwrap(), 4);
+        session.net_close(handle).unwrap();
+        // A closed handle can no longer be used.
+        assert!(matches!(
+            session.net_send(handle, b"again"),
+            Err(Error::NotFound(_))
+        ));
+    }
+
+    {
+        // An app may only reach the host it declared.
+        let mut session = AppSession::new(
+            &mut system,
+            identity(true, vec![Capability::Network(String::from("example.com"))]),
+            Vec::new(),
+            String::from("/"),
+        );
+        session.net_connect("example.com", 443).unwrap();
+        assert!(matches!(
+            session.net_connect("evil.test", 443),
+            Err(Error::CapabilityNotDeclared(_))
+        ));
+    }
+
+    // An app with no network capability cannot even read status.
+    {
+        let mut session = AppSession::new(
+            &mut system,
+            identity(true, Vec::new()),
+            Vec::new(),
+            String::from("/"),
+        );
+        assert!(matches!(
+            session.net_status(),
+            Err(Error::CapabilityNotDeclared(_))
+        ));
+    }
+
+    assert_eq!(
+        system.vfs().platform().connected,
+        ["example.com:80", "example.com:443"]
+    );
 }
 
 #[test]

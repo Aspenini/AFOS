@@ -1,14 +1,22 @@
-#![cfg_attr(not(feature = "experimental-virtio"), allow(dead_code, unused_imports))]
-
 use afos_storage::{BlockDevice, StorageError};
-use alloc::{boxed::Box, format, string::String};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 use virtio_drivers::{
     device::{
         blk::{SECTOR_SIZE, VirtIOBlk},
+        net::VirtIONet,
         rng::VirtIORng,
     },
     transport::{DeviceType, Transport},
 };
+
+use crate::net::NetDevice;
+
+/// `VirtIO` network receive/transmit ring depth. Legacy virtqueues are
+/// fixed-size, so this must match `QEMU`'s default `virtio-net` queue size of
+/// 256.
+const NET_QUEUE_SIZE: usize = 256;
+/// Per-buffer length: a full Ethernet frame plus the `VirtIO` network header.
+const NET_BUFFER_LEN: usize = 2048;
 
 #[cfg(target_arch = "aarch64")]
 use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
@@ -31,20 +39,46 @@ pub trait EntropySource {
 pub struct DeviceSet {
     pub block: Option<Box<dyn BlockDevice>>,
     pub entropy: Option<Box<dyn EntropySource>>,
+    pub net: Option<Box<dyn NetDevice>>,
 }
 
 impl DeviceSet {
-    pub fn discover() -> Self {
-        #[cfg(not(feature = "experimental-virtio"))]
-        return Self {
+    fn empty() -> Self {
+        Self {
             block: None,
             entropy: None,
-        };
-        #[cfg(all(feature = "experimental-virtio", target_arch = "x86_64"))]
-        return discover_pci();
-        #[cfg(all(feature = "experimental-virtio", target_arch = "aarch64"))]
-        return discover_mmio();
+            net: None,
+        }
     }
+
+    fn complete(&self) -> bool {
+        self.block.is_some() && self.entropy.is_some() && self.net.is_some()
+    }
+
+    pub fn discover() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        return discover_pci();
+        // AArch64 VirtIO-MMIO discovery is gated until the kernel maps the
+        // device-MMIO window as Device-nGnRnE memory and performs the DMA cache
+        // maintenance that VirtIO rings require on this architecture. Until then
+        // the kernel boots with the in-memory filesystem instead of faulting on
+        // an unmapped probe. See docs/BARE_METAL.md.
+        #[cfg(target_arch = "aarch64")]
+        return if aarch64_mmio_ready() {
+            discover_mmio()
+        } else {
+            Self::empty()
+        };
+    }
+}
+
+/// Whether the `AArch64` kernel has mapped the `VirtIO`-MMIO window and is ready
+/// to drive DMA-capable `VirtIO` devices. This stays `false` until the
+/// device-memory mapping and ring cache maintenance land; see
+/// [`DeviceSet::discover`].
+#[cfg(target_arch = "aarch64")]
+const fn aarch64_mmio_ready() -> bool {
+    false
 }
 
 struct VirtioBlock {
@@ -89,6 +123,36 @@ impl BlockDevice for VirtioBlock {
     }
 }
 
+struct VirtioNet {
+    driver: VirtIONet<KernelHal, DeviceTransport, NET_QUEUE_SIZE>,
+}
+
+impl NetDevice for VirtioNet {
+    fn mac(&self) -> [u8; 6] {
+        self.driver.mac_address()
+    }
+
+    fn can_send(&self) -> bool {
+        self.driver.can_send()
+    }
+
+    fn receive(&mut self) -> Option<Vec<u8>> {
+        if !self.driver.can_recv() {
+            return None;
+        }
+        let buffer = self.driver.receive().ok()?;
+        let frame = buffer.packet().to_vec();
+        let _ = self.driver.recycle_rx_buffer(buffer);
+        Some(frame)
+    }
+
+    fn transmit(&mut self, frame: &[u8]) {
+        let mut buffer = self.driver.new_tx_buffer(frame.len());
+        buffer.packet_mut().copy_from_slice(frame);
+        let _ = self.driver.send(buffer);
+    }
+}
+
 struct VirtioEntropy {
     driver: VirtIORng<KernelHal, DeviceTransport>,
 }
@@ -125,6 +189,11 @@ fn add_transport(transport: DeviceTransport, devices: &mut DeviceSet) -> Result<
                 .map_err(|error| format!("VirtIO entropy initialization: {error:?}"))?;
             devices.entropy = Some(Box::new(VirtioEntropy { driver }));
         }
+        DeviceType::Network if devices.net.is_none() => {
+            let driver = VirtIONet::<KernelHal, _, NET_QUEUE_SIZE>::new(transport, NET_BUFFER_LEN)
+                .map_err(|error| format!("VirtIO network initialization: {error:?}"))?;
+            devices.net = Some(Box::new(VirtioNet { driver }));
+        }
         _ => {}
     }
     Ok(())
@@ -137,10 +206,7 @@ fn discover_mmio() -> DeviceSet {
     const VIRTIO_MMIO_SIZE: usize = 0x200;
     const VIRTIO_MMIO_SLOTS: u64 = 32;
 
-    let mut devices = DeviceSet {
-        block: None,
-        entropy: None,
-    };
+    let mut devices = DeviceSet::empty();
     for slot in 0..VIRTIO_MMIO_SLOTS {
         let physical = VIRTIO_MMIO_BASE + slot * VIRTIO_MMIO_STRIDE;
         let Some(pointer) = memory::phys_to_virt(physical) else {
@@ -153,10 +219,13 @@ fn discover_mmio() -> DeviceSet {
             continue;
         };
         let device_type = transport.device_type();
-        if matches!(device_type, DeviceType::Block | DeviceType::EntropySource) {
+        if matches!(
+            device_type,
+            DeviceType::Block | DeviceType::EntropySource | DeviceType::Network
+        ) {
             let _ = add_transport(transport, &mut devices);
         }
-        if devices.block.is_some() && devices.entropy.is_some() {
+        if devices.complete() {
             break;
         }
     }
@@ -169,16 +238,16 @@ type DeviceTransport = MmioTransport<'static>;
 #[cfg(target_arch = "x86_64")]
 fn discover_pci() -> DeviceSet {
     let mut root = PciRoot::new(PciIo);
-    let candidates: alloc::vec::Vec<_> = root.enumerate_bus(0).collect();
-    let mut devices = DeviceSet {
-        block: None,
-        entropy: None,
-    };
+    let candidates: Vec<_> = root.enumerate_bus(0).collect();
+    let mut devices = DeviceSet::empty();
     for (function, information) in candidates {
         let Some(device_type) = virtio_device_type(&information) else {
             continue;
         };
-        if !matches!(device_type, DeviceType::Block | DeviceType::EntropySource) {
+        if !matches!(
+            device_type,
+            DeviceType::Block | DeviceType::EntropySource | DeviceType::Network
+        ) {
             continue;
         }
         let (_, command) = root.get_status_command(function);
@@ -197,7 +266,7 @@ fn discover_pci() -> DeviceSet {
             },
             &mut devices,
         );
-        if devices.block.is_some() && devices.entropy.is_some() {
+        if devices.complete() {
             break;
         }
     }

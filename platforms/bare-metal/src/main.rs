@@ -14,6 +14,8 @@ mod devices;
 #[cfg(target_os = "none")]
 mod memory;
 #[cfg(target_os = "none")]
+mod net;
+#[cfg(target_os = "none")]
 mod platform;
 
 #[cfg(target_os = "none")]
@@ -25,7 +27,7 @@ use limine::{
     BaseRevision, RequestsEndMarker, RequestsStartMarker,
     request::{
         ExecutableAddressRequest, FramebufferRequest, HhdmRequest, MemmapRequest, ModulesRequest,
-        TscFrequencyRequest,
+        StackSizeRequest, TscFrequencyRequest,
     },
 };
 #[cfg(target_os = "none")]
@@ -86,12 +88,21 @@ static TSC_FREQUENCY_REQUEST: TscFrequencyRequest = TscFrequencyRequest::new();
 
 #[cfg(target_os = "none")]
 #[used]
+#[unsafe(link_section = ".limine_requests")]
+static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new(1024 * 1024);
+
+#[cfg(target_os = "none")]
+#[used]
 #[unsafe(link_section = ".limine_requests_end")]
 static REQUESTS_END: RequestsEndMarker = RequestsEndMarker::new();
 
 #[cfg(target_os = "none")]
 #[unsafe(no_mangle)]
 extern "C" fn _start() -> ! {
+    // Limine is not required to zero the kernel's `.bss`, and static spinlocks
+    // (such as the global allocator's) must start cleared, so do it first before
+    // any static is touched.
+    zero_bss();
     arch::initialize();
 
     if !BASE_REVISION.is_supported() {
@@ -122,6 +133,7 @@ extern "C" fn _start() -> ! {
         boot_files.mutable,
         devices.block,
         devices.entropy,
+        devices.net,
     ) {
         Ok(platform) => platform,
         Err(error) => fail(&alloc::format!("{error}")),
@@ -143,6 +155,26 @@ extern "C" fn _start() -> ! {
         fail("AFOS stopped after a platform error");
     }
     arch::halt()
+}
+
+#[cfg(target_os = "none")]
+fn zero_bss() {
+    unsafe extern "C" {
+        static mut __bss_start: u8;
+        static mut __bss_end: u8;
+    }
+    let start = core::ptr::addr_of_mut!(__bss_start);
+    let end = core::ptr::addr_of_mut!(__bss_end);
+    // SAFETY: The linker places `__bss_start`/`__bss_end` around the contiguous,
+    // writable `.bss` segment that Limine maps for the kernel image.
+    let length = unsafe { end.offset_from(start) };
+    let length = usize::try_from(length).unwrap_or(0);
+    if length > 0 {
+        // SAFETY: `start` is valid for `length` writable bytes within `.bss`.
+        unsafe {
+            core::ptr::write_bytes(start, 0, length);
+        }
+    }
 }
 
 #[cfg(target_os = "none")]

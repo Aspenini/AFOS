@@ -41,6 +41,7 @@ runtime. A backend does not reimplement those behaviors.
 | Path normalization and mount routing | Secure random bytes |
 | Capability declarations and prompts | Platform and architecture identity |
 | Password verification and rate limiting | Cancellation input |
+| Network capability checks and host policy | TCP/IP stack and network device |
 | Rhai limits and System API bindings | Target entry point and packaging |
 
 The backend receives normalized storage paths. It does not decide which paths
@@ -57,8 +58,8 @@ an app may access; the shared core makes that decision first.
 - `afos-desktop` implements the platform contract with standard input/output,
   native files, system entropy, and a monotonic clock.
 - `afos-kernel` is a standalone ELF kernel with framebuffer, serial, keyboard,
-  clock, memory-map-backed allocation, RAM storage, hardware entropy, and
-  experimental VirtIO adapters.
+  clock, memory-map-backed allocation, VirtIO block persistence, hardware
+  entropy, and a VirtIO + smoltcp TCP/IP stack (x86_64).
 - `xtask` provides reproducible build, packaging, QEMU, and validation tasks.
 
 Only platform crates may depend on host or hardware APIs. Shared crates compile
@@ -87,7 +88,9 @@ Recoverable failures use `afos_api::Error`; platform and application errors do
 not intentionally panic.
 
 Execution is cooperative. AFOS does not currently provide processes, threads,
-background jobs, or preemptive scheduling.
+background jobs, or preemptive scheduling. Networking follows the same model:
+the bare-metal TCP/IP stack is polled from the calling thread, with Escape
+cancellation and per-operation timeouts instead of blocking indefinitely.
 
 ## Virtual filesystem
 

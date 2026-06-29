@@ -47,8 +47,10 @@ print("Hello from AFOS");
   and `_`.
 - `capabilities` is a comma-separated list.
 
-Available capabilities are `fs.read:<path>`, `fs.write:<path>`, `clock`, and
-`system.info`. A filesystem capability covers the named path and descendants.
+Available capabilities are `fs.read:<path>`, `fs.write:<path>`, `clock`,
+`system.info`, and `net:<host>`. A filesystem capability covers the named path
+and descendants. A network capability authorizes outbound TCP connections to a
+host; `net:*` matches any host and `net:example.com` matches only that host.
 
 Every app automatically receives console I/O, arguments, current directory,
 and private storage under `/user/appdata/<app-id>`. Installed apps must declare
@@ -98,6 +100,25 @@ Use `/user/saves` when a file belongs to the user. See
 | `appdata_write(path, text)` | write private application data |
 | `monotonic_millis()` | monotonic milliseconds |
 | `system_info()` | map containing name, version, platform, architecture |
+| `net_status()` | map with `link_up`, `mac`, `address`, and `gateway` |
+| `net_connect(host, port)` | open a TCP connection, returning a handle |
+| `net_send(handle, text)` | send bytes, returning the number written |
+| `net_recv(handle, max)` | receive up to `max` bytes as text (`""` at close) |
+| `net_close(handle)` | close a connection |
+
+Networking requires a `net:<host>` capability. `host` may be an IPv4 literal or
+a DNS name; the platform supplies DHCP, DNS, and the TCP/IP stack. A connection
+handle belongs to the application that opened it and cannot be used after it is
+closed.
+
+```rhai
+// afos:capabilities=net:*
+let socket = net_connect("example.com", 80);
+net_send(socket, "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n");
+print(net_recv(socket, 512));
+net_close(socket);
+0
+```
 
 The final script value is its integer exit status. A script returning `()` or
 no value exits successfully.

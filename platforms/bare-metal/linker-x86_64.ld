@@ -39,8 +39,10 @@ SECTIONS
     } :data
 
     .bss : {
+        PROVIDE(__bss_start = .);
         *(.bss .bss.*)
         *(COMMON)
+        PROVIDE(__bss_end = .);
     } :data
 
     /DISCARD/ : {

@@ -55,16 +55,15 @@ On desktop, `/apps` and `/user` are stored beneath:
 4. the native platform application-data directory during development.
 
 On bare metal, `xtask` creates one Limine module for every file under `fs/`.
-The kernel routes `/sys` modules into the immutable system tree and copies
-initial `/apps` and `/user` modules into a RAM-backed overlay.
+The kernel routes `/sys` modules into the immutable system tree and seeds the
+writable filesystem from the initial `/apps` and `/user` modules on first boot.
 
-The `afos-storage` crate now defines an architecture-neutral block-device
-contract and a checksummed, two-slot snapshot format. Packaging also creates a
-preserved 32 MiB `afos-data.img` beside each ISO. The experimental VirtIO
-adapters are not enabled in normal builds yet, so the default kernel still
-uses the RAM overlay and resets writable changes on reboot. Device mappings
-and completed reboot-persistence tests remain before that backend becomes the
-default.
+The `afos-storage` crate defines an architecture-neutral block-device contract
+and a checksummed, two-slot snapshot format. Packaging also creates a preserved
+32 MiB `afos-data.img` beside each ISO. On x86_64 the kernel mounts this image
+as a VirtIO block device, so `/apps` and `/user` changes survive reboots.
+AArch64 still uses the RAM-backed overlay and resets writable changes on reboot
+until its VirtIO-MMIO device mappings are finished.
 
 Desktop reads `/sys` from the directory selected by `--system-dir`,
 `AFOS_SYSTEM_DIR`, the adjacent `fs/sys` directory, or the repository's

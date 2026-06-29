@@ -20,6 +20,9 @@ malicious firmware, or replacement of the AFOS executable.
   capabilities declared in their source.
 - Installed `/apps` applications receive only console, arguments, current
   directory, and their own appdata by default.
+- Filesystem, clock, system-info, and network operations must each be declared.
+  A `net:<host>` capability is matched against the requested host, and `net:*`
+  authorizes any host; outbound connections are otherwise refused.
 - Every other installed-app operation must be declared, confirmed by the user,
   and authenticated when a master password exists.
 - Authorization applies to one operation only. AFOS does not cache or persist

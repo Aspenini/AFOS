@@ -8,9 +8,6 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
-[features]
-experimental-virtio = []
-
 [dependencies]
 afos-api.workspace = true
 afos-core.workspace = true
@@ -19,6 +16,7 @@ afos-storage.workspace = true
 limine.workspace = true
 linked_list_allocator.workspace = true
 noto-sans-mono-bitmap.workspace = true
+smoltcp.workspace = true
 virtio-drivers.workspace = true
 zerocopy.workspace = true
 

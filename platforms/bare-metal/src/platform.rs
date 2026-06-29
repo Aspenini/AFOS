@@ -1,9 +1,17 @@
-use afos_api::{Error, Platform, Result, StorageEntry, SystemInfo};
+use afos_api::{Error, NetStatus, Platform, Result, StorageEntry, SystemInfo};
 use afos_storage::{BlockDevice, FileTree, SnapshotStore, StorageError};
 use alloc::{boxed::Box, collections::BTreeMap, format, string::String, vec::Vec};
 use limine::framebuffer::Framebuffer;
 
-use crate::{arch, console::Console, devices::EntropySource};
+use crate::{
+    arch,
+    console::Console,
+    devices::EntropySource,
+    net::{NetDevice, NetError, NetStack},
+};
+
+/// How long a single network operation may block before timing out.
+const NET_TIMEOUT_MILLIS: u64 = 30_000;
 
 pub struct InitialFile {
     pub path: &'static str,
@@ -15,11 +23,13 @@ pub struct BareMetalPlatform {
     tree: FileTree,
     persistence: Option<SnapshotStore<Box<dyn BlockDevice>>>,
     entropy: Option<Box<dyn EntropySource>>,
+    net: Option<NetStack>,
     started: u64,
     counter_frequency: u64,
 }
 
 impl BareMetalPlatform {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         framebuffer: Option<&'static Framebuffer>,
         hhdm: u64,
@@ -28,6 +38,7 @@ impl BareMetalPlatform {
         initial_files: Vec<InitialFile>,
         block: Option<Box<dyn BlockDevice>>,
         entropy: Option<Box<dyn EntropySource>>,
+        net: Option<Box<dyn NetDevice>>,
     ) -> Result<Self> {
         let (persistence, restored) = if let Some(device) = block {
             let (store, restored) = SnapshotStore::open(device).map_err(storage_error)?;
@@ -35,11 +46,13 @@ impl BareMetalPlatform {
         } else {
             (None, None)
         };
+        let net = net.map(|device| NetStack::new(device, 0, arch::counter()));
         let mut platform = Self {
             console: Console::new(framebuffer, hhdm, executable_address),
             tree: restored.unwrap_or_default(),
             persistence,
             entropy,
+            net,
             started: arch::counter(),
             counter_frequency,
         };
@@ -92,6 +105,43 @@ impl BareMetalPlatform {
             return Err(error);
         }
         Ok(())
+    }
+
+    /// Runs `operation` against the network stack with a monotonic clock and an
+    /// Escape-driven cancellation probe. Borrows of the disjoint `net` and
+    /// `console` fields are split so both closures stay live during the call.
+    fn with_net<R>(
+        &mut self,
+        operation: impl FnOnce(&mut NetStack, &mut dyn FnMut() -> u64, &mut dyn FnMut() -> bool) -> R,
+    ) -> Option<R> {
+        let started = self.started;
+        let frequency = self.counter_frequency;
+        let console = &mut self.console;
+        let stack = self.net.as_mut()?;
+        let mut clock = || {
+            arch::counter()
+                .saturating_sub(started)
+                .saturating_mul(1_000)
+                / frequency
+        };
+        let mut cancel = || console.poll_cancel();
+        Some(operation(stack, &mut clock, &mut cancel))
+    }
+}
+
+fn net_unavailable() -> Error {
+    Error::Unsupported(String::from("no network device is available"))
+}
+
+fn map_net_error(error: NetError) -> Error {
+    match error {
+        NetError::NoLease => Error::Io(String::from("no DHCP lease was acquired")),
+        NetError::NameResolution(message) => {
+            Error::Io(format!("name resolution failed: {message}"))
+        }
+        NetError::Timeout(message) | NetError::Socket(message) => Error::Io(message),
+        NetError::Cancelled => Error::Io(String::from("network operation cancelled")),
+        NetError::Closed => Error::Io(String::from("connection is closed")),
     }
 }
 
@@ -273,6 +323,46 @@ impl Platform for BareMetalPlatform {
             platform: String::from("Limine bare metal"),
             architecture: String::from(ARCHITECTURE),
         }
+    }
+
+    fn net_status(&mut self) -> Result<NetStatus> {
+        self.with_net(|stack, clock, cancel| {
+            // Give DHCP a brief window to acquire a lease before reporting.
+            let deadline = clock().saturating_add(5_000);
+            while !stack.is_configured() {
+                stack.poll(clock());
+                if stack.is_configured() || cancel() || clock() >= deadline {
+                    break;
+                }
+            }
+            stack.status()
+        })
+        .ok_or_else(net_unavailable)
+    }
+
+    fn net_connect(&mut self, host: &str, port: u16) -> Result<u64> {
+        self.with_net(|stack, clock, cancel| {
+            stack.connect(host, port, NET_TIMEOUT_MILLIS, clock, cancel)
+        })
+        .ok_or_else(net_unavailable)?
+        .map_err(map_net_error)
+    }
+
+    fn net_send(&mut self, handle: u64, data: &[u8]) -> Result<usize> {
+        self.with_net(|stack, clock, cancel| stack.send(handle, data, clock, cancel))
+            .ok_or_else(net_unavailable)?
+            .map_err(map_net_error)
+    }
+
+    fn net_recv(&mut self, handle: u64, out: &mut [u8]) -> Result<usize> {
+        self.with_net(|stack, clock, cancel| stack.recv(handle, out, clock, cancel))
+            .ok_or_else(net_unavailable)?
+            .map_err(map_net_error)
+    }
+
+    fn net_close(&mut self, handle: u64) -> Result<()> {
+        self.with_net(|stack, clock, _cancel| stack.close(handle, clock))
+            .ok_or_else(net_unavailable)
     }
 
     fn poll_cancel(&mut self) -> bool {

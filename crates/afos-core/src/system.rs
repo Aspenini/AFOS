@@ -1,5 +1,6 @@
 use afos_api::{
-    AppIdentity, Capability, Error, Platform, Result, StorageEntry, SystemApi, SystemInfo,
+    AppIdentity, Capability, Error, NetStatus, Platform, Result, StorageEntry, SystemApi,
+    SystemInfo,
 };
 use alloc::{string::String, string::ToString, vec::Vec};
 
@@ -161,8 +162,17 @@ fn declares(app: &AppIdentity, requested: &Capability) -> bool {
             }
             (Capability::Clock, Capability::Clock)
             | (Capability::SystemInfo, Capability::SystemInfo) => true,
+            (Capability::Network(pattern), Capability::Network(host)) => {
+                pattern == "*" || pattern.eq_ignore_ascii_case(host)
+            }
             _ => false,
         })
+}
+
+fn declares_any_network(app: &AppIdentity) -> bool {
+    app.capabilities
+        .iter()
+        .any(|capability| matches!(capability, Capability::Network(_)))
 }
 
 pub struct AppSession<'a, P> {
@@ -171,6 +181,7 @@ pub struct AppSession<'a, P> {
     args: Vec<String>,
     cwd: String,
     appdata_root: String,
+    sockets: Vec<u64>,
 }
 
 impl<'a, P: Platform> AppSession<'a, P> {
@@ -188,11 +199,25 @@ impl<'a, P: Platform> AppSession<'a, P> {
             args,
             cwd,
             appdata_root,
+            sockets: Vec::new(),
         }
     }
 
     fn resolve(&self, path: &str) -> Result<String> {
         normalize_path(&self.cwd, path)
+    }
+
+    /// Confirms a handle was opened by this session before forwarding an
+    /// operation to the platform, so an application cannot reach a connection
+    /// it never authorized.
+    fn owned_socket(&self, handle: u64) -> Result<()> {
+        if self.sockets.contains(&handle) {
+            Ok(())
+        } else {
+            Err(Error::NotFound(alloc::format!(
+                "network connection {handle}"
+            )))
+        }
     }
 
     fn resolve_appdata(&self, path: &str) -> Result<String> {
@@ -296,6 +321,51 @@ impl<P: Platform> SystemApi for AppSession<'_, P> {
         self.system
             .authorize(&self.app, &Capability::SystemInfo, "system information")?;
         Ok(self.system.vfs.platform().system_info())
+    }
+
+    fn net_status(&mut self) -> Result<NetStatus> {
+        if !declares_any_network(&self.app) {
+            return Err(Error::CapabilityNotDeclared(String::from("net:<host>")));
+        }
+        self.system.vfs.platform_mut().net_status()
+    }
+
+    fn net_connect(&mut self, host: &str, port: u16) -> Result<u64> {
+        if host.is_empty() {
+            return Err(Error::InvalidInput(String::from("empty network host")));
+        }
+        let resource = alloc::format!("{host}:{port}");
+        self.system.authorize(
+            &self.app,
+            &Capability::Network(String::from(host)),
+            &resource,
+        )?;
+        let handle = self.system.vfs.platform_mut().net_connect(host, port)?;
+        self.sockets.push(handle);
+        Ok(handle)
+    }
+
+    fn net_send(&mut self, handle: u64, data: &[u8]) -> Result<usize> {
+        self.owned_socket(handle)?;
+        self.system.vfs.platform_mut().net_send(handle, data)
+    }
+
+    fn net_recv(&mut self, handle: u64, max: usize) -> Result<Vec<u8>> {
+        self.owned_socket(handle)?;
+        let mut buffer = alloc::vec![0_u8; max];
+        let count = self
+            .system
+            .vfs
+            .platform_mut()
+            .net_recv(handle, &mut buffer)?;
+        buffer.truncate(count);
+        Ok(buffer)
+    }
+
+    fn net_close(&mut self, handle: u64) -> Result<()> {
+        self.owned_socket(handle)?;
+        self.sockets.retain(|open| *open != handle);
+        self.system.vfs.platform_mut().net_close(handle)
     }
 
     fn cancelled(&mut self) -> bool {

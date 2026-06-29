@@ -101,6 +101,14 @@ fn parse_capability(value: &str) -> Result<Capability> {
     if let Some(path) = value.strip_prefix("fs.write:") {
         return Ok(Capability::FsWrite(String::from(path)));
     }
+    if let Some(host) = value.strip_prefix("net:") {
+        if host.is_empty() {
+            return Err(Error::InvalidInput(String::from(
+                "network capability requires a host pattern",
+            )));
+        }
+        return Ok(Capability::Network(String::from(host)));
+    }
     Err(Error::InvalidInput(alloc::format!(
         "unknown capability: {value}"
     )))
